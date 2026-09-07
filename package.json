@@ -1,0 +1,35 @@
+{
+  "name": "restaurant",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,web -c yellow,cyan \"node server/index.js\" \"vite\"",
+    "dev:server": "node server/index.js",
+    "build": "vue-tsc -b && vite build",
+    "start": "node server/index.js",
+    "seed:menu": "node server/seed.js",
+    "preview": "vite preview",
+    "qrcodes": "node server/make-qrcodes.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "multer": "^2.3.0",
+    "qrcode": "^1.5.4",
+    "vue": "^3.5.41",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "concurrently": "^10.0.5",
+    "sharp": "^0.35.4",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vue-tsc": "^3.3.11"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

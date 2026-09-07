@@ -1,0 +1,548 @@
+{
+  "_說明": "嚐香聚牛肉麵 菜單資料。改完執行 npm run seed:menu 匯入（會覆蓋現有菜單）。price 為整數（新台幣）。",
+  "店名": "嚐香聚牛肉麵",
+  "optionGroups": [
+    {
+      "key": "湯乾",
+      "name": "湯的還是乾的",
+      "mode": "single",
+      "required": true,
+      "choices": [
+        {
+          "name": "湯",
+          "price_delta": 0
+        },
+        {
+          "name": "乾",
+          "price_delta": 0
+        }
+      ]
+    },
+    {
+      "key": "換麵",
+      "name": "換麵（不加價或小額加價）",
+      "mode": "single",
+      "required": false,
+      "choices": [
+        {
+          "name": "不換（原麵）",
+          "price_delta": 0
+        },
+        {
+          "name": "換細麵",
+          "price_delta": 0
+        },
+        {
+          "name": "換冬粉",
+          "price_delta": 0
+        },
+        {
+          "name": "換烏龍麵",
+          "price_delta": 15
+        },
+        {
+          "name": "換麵疙瘩",
+          "price_delta": 15
+        }
+      ]
+    },
+    {
+      "key": "加麵",
+      "name": "加麵",
+      "mode": "single",
+      "required": false,
+      "choices": [
+        {
+          "name": "不加",
+          "price_delta": 0
+        },
+        {
+          "name": "加麵",
+          "price_delta": 10
+        },
+        {
+          "name": "加細麵",
+          "price_delta": 10
+        },
+        {
+          "name": "加冬粉",
+          "price_delta": 10
+        },
+        {
+          "name": "加烏龍麵",
+          "price_delta": 30
+        },
+        {
+          "name": "加麵疙瘩",
+          "price_delta": 30
+        }
+      ]
+    },
+    {
+      "key": "滷肉飯份量",
+      "name": "份量",
+      "mode": "single",
+      "required": true,
+      "choices": [
+        {
+          "name": "小",
+          "price_delta": 0
+        },
+        {
+          "name": "大",
+          "price_delta": 10
+        }
+      ]
+    },
+    {
+      "key": "加牛肉",
+      "name": "加牛肉",
+      "mode": "single",
+      "required": false,
+      "choices": [
+        {
+          "name": "不加",
+          "price_delta": 0
+        },
+        {
+          "name": "加牛肉",
+          "price_delta": 80
+        }
+      ]
+    }
+  ],
+  "categories": [
+    {
+      "name": "牛肉類",
+      "items": [
+        {
+          "name": "牛三寶麵",
+          "price": 190,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/beef-noodle-soup.jpg"
+        },
+        {
+          "name": "牛肉麵疙瘩",
+          "price": 155,
+          "options": [
+            "湯乾",
+            "加麵"
+          ]
+        },
+        {
+          "name": "牛肉烏龍麵",
+          "price": 150,
+          "options": [
+            "湯乾",
+            "加麵"
+          ]
+        },
+        {
+          "name": "牛筋麵",
+          "price": 160,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/beef-noodle-soup.jpg"
+        },
+        {
+          "name": "牛肚麵",
+          "price": 160,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/beef-noodle-soup.jpg"
+        },
+        {
+          "name": "半筋半肉麵",
+          "price": 160,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/beef-noodle-soup.jpg"
+        },
+        {
+          "name": "餛飩牛肉麵",
+          "price": 170,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/beef-noodle-soup.jpg"
+        },
+        {
+          "name": "牛肉麵",
+          "price": 140,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/beef-noodle-big.jpg"
+        },
+        {
+          "name": "牛湯麵",
+          "price": 70,
+          "options": [
+            "加麵"
+          ],
+          "image": "/images/beef-soup.jpg"
+        },
+        {
+          "name": "牛肉冬粉",
+          "price": 140,
+          "options": [
+            "加麵"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "非牛肉類",
+      "items": [
+        {
+          "name": "餛飩麵",
+          "price": 80,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ]
+        },
+        {
+          "name": "榨菜肉絲麵",
+          "price": 80,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ],
+          "image": "/images/zhacai-noodle.jpg"
+        },
+        {
+          "name": "陽春麵（細）",
+          "price": 70,
+          "options": [
+            "湯乾",
+            "換麵",
+            "加麵"
+          ]
+        },
+        {
+          "name": "酸辣麵",
+          "price": 80,
+          "options": [
+            "加麵"
+          ]
+        },
+        {
+          "name": "冬瓜排骨麵",
+          "price": 110,
+          "options": [
+            "加麵"
+          ]
+        },
+        {
+          "name": "冬瓜排骨餛飩麵",
+          "price": 130,
+          "options": [
+            "加麵"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "乾麵類",
+      "items": [
+        {
+          "name": "雙醬麵",
+          "price": 85,
+          "options": [
+            "加麵"
+          ]
+        },
+        {
+          "name": "紅油乾麵",
+          "price": 75,
+          "options": [
+            "加麵"
+          ]
+        },
+        {
+          "name": "麻醬麵",
+          "price": 75,
+          "options": [
+            "加麵"
+          ]
+        },
+        {
+          "name": "榨醬麵",
+          "price": 75,
+          "options": [
+            "加麵"
+          ]
+        },
+        {
+          "name": "油潑辣仔細麵",
+          "price": 80,
+          "options": [
+            "加麵"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "飯類",
+      "items": [
+        {
+          "name": "牛腩燴飯",
+          "price": 110,
+          "options": []
+        },
+        {
+          "name": "滷肉飯",
+          "price": 35,
+          "description": "小 35 元／大 45 元",
+          "options": [
+            "滷肉飯份量"
+          ]
+        },
+        {
+          "name": "酸辣湯飯",
+          "price": 80,
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "餃類",
+      "items": [
+        {
+          "name": "紅油抄手",
+          "price": 65,
+          "options": []
+        },
+        {
+          "name": "麻醬抄手",
+          "price": 65,
+          "options": []
+        },
+        {
+          "name": "手工水餃",
+          "price": 80,
+          "description": "10 顆／份",
+          "options": [],
+          "image": "/images/dumpling.jpg"
+        },
+        {
+          "name": "牛湯水餃",
+          "price": 85,
+          "options": [],
+          "image": "/images/dumpling.jpg"
+        },
+        {
+          "name": "酸辣湯餃",
+          "price": 85,
+          "options": [],
+          "image": "/images/dumpling.jpg"
+        }
+      ]
+    },
+    {
+      "name": "湯類",
+      "items": [
+        {
+          "name": "牛肚湯",
+          "price": 130,
+          "options": []
+        },
+        {
+          "name": "牛筋湯",
+          "price": 110,
+          "options": []
+        },
+        {
+          "name": "牛三寶湯",
+          "price": 180,
+          "options": []
+        },
+        {
+          "name": "餛飩湯",
+          "price": 45,
+          "options": []
+        },
+        {
+          "name": "牛肉湯",
+          "price": 110,
+          "options": [],
+          "image": "/images/beef-soup.jpg"
+        },
+        {
+          "name": "牛清湯",
+          "price": 40,
+          "options": [
+            "加牛肉"
+          ],
+          "image": "/images/beef-soup.jpg"
+        },
+        {
+          "name": "蛋花湯",
+          "price": 30,
+          "options": []
+        },
+        {
+          "name": "海菜蛋花湯",
+          "price": 40,
+          "options": []
+        },
+        {
+          "name": "榨菜肉絲湯",
+          "price": 45,
+          "options": []
+        },
+        {
+          "name": "酸辣湯",
+          "price": 45,
+          "options": []
+        },
+        {
+          "name": "貢丸蛋花湯",
+          "price": 50,
+          "options": []
+        },
+        {
+          "name": "冬瓜排骨湯",
+          "price": 100,
+          "options": []
+        },
+        {
+          "name": "排骨餛飩湯",
+          "price": 120,
+          "options": []
+        },
+        {
+          "name": "牛肉餛飩湯",
+          "price": 145,
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "小菜",
+      "items": [
+        {
+          "name": "小魚豆乾",
+          "price": 50,
+          "image": "/images/dried-tofu.jpg",
+          "options": []
+        },
+        {
+          "name": "皮蛋豆腐",
+          "price": 45,
+          "options": []
+        },
+        {
+          "name": "泡菜蘿蔔",
+          "price": 35,
+          "options": []
+        },
+        {
+          "name": "高麗菜泡菜",
+          "price": 50,
+          "options": []
+        },
+        {
+          "name": "辣筍",
+          "price": 40,
+          "image": "/images/spicy-bamboo.jpg",
+          "options": []
+        },
+        {
+          "name": "大頭菜",
+          "price": 40,
+          "options": []
+        },
+        {
+          "name": "乾絲",
+          "price": 40,
+          "image": "/images/shredded-tofu.jpg",
+          "options": []
+        },
+        {
+          "name": "海帶芽",
+          "price": 40,
+          "options": []
+        },
+        {
+          "name": "小黃瓜",
+          "price": 50,
+          "image": "/images/cucumber.jpg",
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "滷味",
+      "items": [
+        {
+          "name": "牛腱肉",
+          "price": 90,
+          "options": []
+        },
+        {
+          "name": "牛筋",
+          "price": 100,
+          "options": []
+        },
+        {
+          "name": "牛肚",
+          "price": 90,
+          "options": []
+        },
+        {
+          "name": "大腸",
+          "price": 60,
+          "options": []
+        },
+        {
+          "name": "豬耳朵",
+          "price": 50,
+          "image": "/images/pig-ear.jpg",
+          "options": []
+        },
+        {
+          "name": "花生",
+          "price": 50,
+          "options": []
+        },
+        {
+          "name": "滷蛋",
+          "price": 15,
+          "options": []
+        },
+        {
+          "name": "海帶",
+          "price": 15,
+          "options": []
+        },
+        {
+          "name": "小豆乾",
+          "price": 15,
+          "image": "/images/dried-tofu.jpg",
+          "options": []
+        }
+      ]
+    }
+  ]
+}

@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "npm@12.0.2",
   "scripts": {
     "dev": "concurrently -n server,web -c yellow,cyan \"node server/index.js\" \"vite\"",
     "dev:server": "node server/index.js",

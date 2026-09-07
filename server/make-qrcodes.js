@@ -24,7 +24,9 @@ function lanIP() {
   return found.sort((a, b) => rank(a) - rank(b))[0] || 'localhost';
 }
 
-const base = process.env.PUBLIC_URL || `http://${lanIP()}:${PORT}`;
+const base = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://${lanIP()}:${PORT}`;
+// 部署在雲端（https）時，客人用手機網路就能點；區網版才需要連店內 WiFi
+const isCloud = base.startsWith('https://');
 const tables = db.prepare('SELECT * FROM tables ORDER BY id').all();
 
 const cards = await Promise.all(
@@ -83,7 +85,11 @@ const html = `<!doctype html>
   <div class="grid">
 ${cards.join('\n')}
   </div>
-  <p class="tip">※ 客人手機需連上店內 WiFi 才掃得開。若路由器換了 IP，請重新執行 npm run qrcodes 並重印。</p>
+  <p class="tip">${
+    isCloud
+      ? '※ 客人用自己的手機網路就能掃，不必連店內 WiFi。網址固定不會變，這批 QRcode 可以一直用。'
+      : '※ 客人手機需連上店內 WiFi 才掃得開。若路由器換了 IP，請重新執行 npm run qrcodes 並重印。'
+  }</p>
 </body>
 </html>
 `;

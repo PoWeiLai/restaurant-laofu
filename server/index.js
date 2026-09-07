@@ -43,7 +43,9 @@ function lanIP() {
   candidates.sort((a, b) => rank(a.address) - rank(b.address));
   return candidates[0]?.address || 'localhost';
 }
-const baseURL = () => process.env.PUBLIC_URL || `http://${lanIP()}:${PORT}`;
+// PUBLIC_URL 手動指定 > 雲端平台自動提供的網址 > 本機區網 IP
+const baseURL = () =>
+  process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://${lanIP()}:${PORT}`;
 
 // 店員身分（廚房 / 後台）：內網用共用 PIN 即可
 function staffOnly(req, res, next) {

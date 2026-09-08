@@ -1,7 +1,7 @@
 # Render 部署設定。到 Render 按 New → Blueprint → 選這個 repo，會自動照這份建立服務。
 services:
   - type: web
-    name: restaurant-order
+    name: laofu-order
     runtime: node
     plan: free          # 免費方案：15 分鐘沒流量會休眠，喚醒約 1 分鐘，且沒有永久硬碟
     region: singapore   # Render 沒有台灣機房，新加坡離台灣最近
@@ -9,6 +9,6 @@ services:
     startCommand: npm start
     envVars:
       - key: STAFF_PIN
-        value: beefnoodle123
+        value: laofu2026
       # PUBLIC_URL 不用設：程式會自動讀 Render 給的 RENDER_EXTERNAL_URL，
       # QRcode 就會指向正確的線上網址。

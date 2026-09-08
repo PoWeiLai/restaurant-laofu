@@ -187,7 +187,7 @@ onUnmounted(unsubscribe)
   <div class="page">
     <header class="top">
       <div>
-        <div class="muted small">嚐香聚牛肉麵</div>
+        <div class="shop small">老福家常牛肉麵</div>
         <h1>{{ tableNo }} 號桌</h1>
       </div>
       <div class="switch">
@@ -354,17 +354,27 @@ onUnmounted(unsubscribe)
   padding-bottom: 96px;
   min-height: 100%;
 }
+/* 店內招牌感：紅底金邊 */
 .top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #a81c16, #8a140f);
+  border-bottom: 3px solid var(--gold);
+  color: #fff;
   position: sticky;
   top: 0;
   z-index: 20;
+}
+.top h1 {
+  color: #fff;
+}
+.shop {
+  color: var(--gold-soft);
+  font-weight: 700;
+  letter-spacing: 3px;
 }
 .small {
   font-size: 13px;
@@ -373,9 +383,14 @@ onUnmounted(unsubscribe)
   display: flex;
   gap: 6px;
 }
+.switch button {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
 .switch button.on {
-  background: var(--brand-soft);
-  border-color: var(--brand);
+  background: var(--gold-soft);
+  border-color: var(--gold);
   color: var(--brand-dark);
   font-weight: 600;
 }
@@ -384,10 +399,15 @@ onUnmounted(unsubscribe)
   min-width: 20px;
   margin-left: 6px;
   padding: 0 5px;
-  background: var(--brand);
-  color: #fff;
+  background: var(--gold);
+  color: var(--brand-dark);
   border-radius: 999px;
   font-size: 12px;
+  font-weight: 700;
+}
+.switch button.on .dot {
+  background: var(--brand);
+  color: #fff;
 }
 .cats {
   display: flex;
@@ -395,8 +415,9 @@ onUnmounted(unsubscribe)
   overflow-x: auto;
   padding: 12px 16px;
   position: sticky;
-  top: 73px;
-  background: var(--bg);
+  top: 75px;
+  background: rgba(244, 227, 217, 0.94);
+  backdrop-filter: blur(6px);
   z-index: 10;
   scrollbar-width: none;
 }

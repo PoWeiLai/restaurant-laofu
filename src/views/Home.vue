@@ -10,7 +10,10 @@ onMounted(async () => {
 
 <template>
   <div class="home">
-    <h1>餐廳點餐系統</h1>
+    <div class="sign">
+      <h1>老福家常牛肉麵</h1>
+      <p>02-8966-0223　土城區廣明街63巷28號</p>
+    </div>
     <p class="muted">客人掃桌上的 QRcode 即可點餐，訂單直接進廚房看板。</p>
 
     <div class="cards">
@@ -39,8 +42,25 @@ onMounted(async () => {
   margin: 0 auto;
   padding: 48px 20px;
 }
-h1 {
+/* 招牌：紅底金框，對應店內門面 */
+.sign {
+  background: linear-gradient(180deg, #a81c16, #8a140f);
+  border: 3px solid var(--gold);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+.sign h1 {
   font-size: 30px;
+  color: var(--gold-soft);
+  letter-spacing: 4px;
+}
+.sign p {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
 }
 .cards {
   display: grid;

@@ -48,7 +48,7 @@ const html = `<!doctype html>
 <html lang="zh-Hant-TW">
 <head>
 <meta charset="UTF-8" />
-<title>嚐香聚牛肉麵 — 桌號 QRcode</title>
+<title>老福家常牛肉麵 — 桌號 QRcode</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -79,7 +79,7 @@ const html = `<!doctype html>
 </head>
 <body>
   <header>
-    <h1>嚐香聚牛肉麵 — 桌號 QRcode</h1>
+    <h1>老福家常牛肉麵 — 桌號 QRcode</h1>
     <p>按 Ctrl+P 列印，剪下後貼在各桌上。網址：${base}</p>
   </header>
   <div class="grid">

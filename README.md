@@ -202,7 +202,9 @@ public/images/          菜色照片
 ### 用 Render 部署（免費方案，僅供展示）
 
 專案根目錄的 `render.yaml` 已寫好設定，到 Render 按 **New → Blueprint** 選這個 repo
-即可自動建立服務、帶入 `STAFF_PIN`。`PUBLIC_URL` 不用設，程式會自動讀 Render 提供的
+即可自動建立服務。建立時 Render 會問 `STAFF_PIN` 要填什麼（密碼不寫進 repo，免得公開的
+repo 等於把店員密碼貼出來），填一組自己記得的即可；之後要改，到服務的 **Environment**
+頁改再重新部署。`PUBLIC_URL` 不用設，程式會自動讀 Render 提供的
 `RENDER_EXTERNAL_URL`，QRcode 就會指向線上網址。
 
 免費方案的限制讓它**只能展示、不能營業**：

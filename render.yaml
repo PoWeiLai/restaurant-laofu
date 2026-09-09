@@ -9,6 +9,6 @@ services:
     startCommand: npm start
     envVars:
       - key: STAFF_PIN
-        value: laofu2026
+        sync: false     # 不寫在檔案裡：建立 Blueprint 時 Render 會問你要設什麼密碼
       # PUBLIC_URL 不用設：程式會自動讀 Render 給的 RENDER_EXTERNAL_URL，
       # QRcode 就會指向正確的線上網址。

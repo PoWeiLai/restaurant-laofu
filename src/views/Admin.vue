@@ -151,11 +151,102 @@ const loadQr = async () => (qr.value = await api.qrcodes())
 const bills = ref<Bill[]>([])
 const loadBills = async () => (bills.value = await api.bills())
 const closeBill = (bill: Bill, payment: string) => {
-  if (!confirm(`${bill.table.name} 結帳 ${money(bill.total)}，確定嗎？`)) return
+  const note = bill.givenAway ? `（已折讓 ${money(bill.givenAway)}）` : ''
+  if (!confirm(`${bill.table.name} 結帳 ${money(bill.total)}${note}，確定嗎？`)) return
   run(async () => {
     await api.closeBill(bill.id, payment)
     await Promise.all([loadBills(), loadReport()])
   }, '已完成結帳')
+}
+
+/* ---------- 折扣與免單 ---------- */
+// 打折的常用檔位。value 存「折讓成數」：10 代表折一成，也就是打 9 折。
+const DISCOUNT_PRESETS = [
+  { label: '95 折', value: 5 },
+  { label: '9 折', value: 10 },
+  { label: '85 折', value: 15 },
+  { label: '8 折', value: 20 },
+]
+
+/** 折扣一律要問理由：事後對帳才知道錢是怎麼少的 */
+function askReason(what: string) {
+  const reason = prompt(`${what}\n原因（招待、客訴補償、員工餐…）`, '')
+  return reason === null ? null : reason.trim()
+}
+
+const setBillDiscount = (bill: Bill, type: 'percent' | 'amount' | 'free', value = 0) => {
+  let amount = value
+  if (type === 'amount') {
+    const input = prompt(`${bill.table.name} 要折抵多少錢？（目前應收 ${money(bill.subtotal)}）`, '50')
+    if (input === null) return
+    amount = Number(input)
+    if (!Number.isFinite(amount) || amount <= 0) return say('折抵金額不正確')
+  }
+  if (type === 'free' && !confirm(`${bill.table.name} 整桌免單 ${money(bill.subtotal)}，確定嗎？`)) return
+
+  const reason = askReason(`${bill.table.name} 套用折扣`)
+  if (reason === null) return
+  run(async () => {
+    await api.discountBill(bill.id, type, amount, reason)
+    await loadBills()
+  }, '折扣已套用')
+}
+
+const clearBillDiscount = (bill: Bill) =>
+  run(async () => {
+    await api.discountBill(bill.id, 'none')
+    await loadBills()
+  }, '已取消折扣')
+
+const toggleVoid = (item: OrderItem, reload: () => Promise<unknown>) => {
+  if (item.voided) {
+    return run(async () => {
+      await api.voidItem(item.id, false)
+      await reload()
+    }, `「${item.name}」已恢復計費`)
+  }
+  const reason = askReason(`「${item.name}」免單`)
+  if (reason === null) return
+  run(async () => {
+    await api.voidItem(item.id, true, reason)
+    await reload()
+  }, `「${item.name}」已免單`)
+}
+
+const setOrderDiscount = (o: Order, type: 'percent' | 'amount' | 'free', value = 0) => {
+  const who = `外帶 ${o.pickup_no}`
+  let amount = value
+  if (type === 'amount') {
+    const input = prompt(`${who} 要折抵多少錢？（目前應收 ${money(o.total)}）`, '50')
+    if (input === null) return
+    amount = Number(input)
+    if (!Number.isFinite(amount) || amount <= 0) return say('折抵金額不正確')
+  }
+  if (type === 'free' && !confirm(`${who} 整單免單，確定嗎？`)) return
+
+  const reason = askReason(`${who} 套用折扣`)
+  if (reason === null) return
+  run(async () => {
+    await api.discountOrder(o.id, type, amount, reason)
+    await loadTakeout()
+  }, '折扣已套用')
+}
+
+const clearOrderDiscount = (o: Order) =>
+  run(async () => {
+    await api.discountOrder(o.id, 'none')
+    await loadTakeout()
+  }, '已取消折扣')
+
+/** 折扣顯示文字，例如「9 折」「折抵 $50」「整單免單」 */
+function discountLabel(d: { discount_type: string; discount_value: number }) {
+  if (d.discount_type === 'free') return '整單免單'
+  if (d.discount_type === 'amount') return `折抵 ${money(d.discount_value)}`
+  if (d.discount_type === 'percent') {
+    const tenths = (100 - d.discount_value) / 10
+    return `${Number.isInteger(tenths) ? tenths : tenths.toFixed(1)} 折`
+  }
+  return ''
 }
 const printBill = (bill: Bill) => {
   printTarget.value = bill
@@ -254,6 +345,7 @@ function start() {
 const unsubscribe = subscribe({
   'order:new': () => refreshCurrentTab(),
   'order:update': () => refreshCurrentTab(),
+  'bill:update': () => refreshCurrentTab(),
 })
 
 /** 新單進來時只重抓當下這一頁，外帶單才會即時跳出來讓櫃檯看到 */
@@ -401,13 +493,51 @@ onUnmounted(unsubscribe)
             <h2>{{ b.table.name }}</h2>
             <strong class="total tabular">{{ money(b.total) }}</strong>
           </header>
-          <ul class="lines">
-            <li v-for="o in b.orders" :key="o.id">
-              <span class="muted">第 {{ o.id }} 單</span>
-              <span>{{ o.items.map(describeLine).join('、') }}</span>
-              <span class="tabular">{{ money(o.total) }}</span>
-            </li>
+          <!-- 逐項列出，才能單獨把某一項免單（客訴補一碗、做壞了重做） -->
+          <ul class="lines items-list">
+            <template v-for="o in b.orders" :key="o.id">
+              <li v-for="i in o.items" :key="i.id" :class="{ voided: i.voided }">
+                <span class="muted">第 {{ o.id }} 單</span>
+                <span>
+                  {{ describeLine(i) }}
+                  <em v-if="i.voided" class="void-tag">免單{{ i.void_reason ? `：${i.void_reason}` : '' }}</em>
+                </span>
+                <span class="tabular">{{ money(i.price * i.qty) }}</span>
+                <button class="tiny" @click="toggleVoid(i, loadBills)">
+                  {{ i.voided ? '恢復計費' : '免單' }}
+                </button>
+              </li>
+            </template>
           </ul>
+
+          <div class="sums tabular">
+            <div v-if="b.voidedAmount"><span>免單項目</span><span>−{{ money(b.voidedAmount) }}</span></div>
+            <div><span>小計</span><span>{{ money(b.subtotal) }}</span></div>
+            <div v-if="b.discount" class="cut">
+              <span>
+                折扣（{{ discountLabel(b) }}）
+                <em v-if="b.discount_reason" class="muted">{{ b.discount_reason }}</em>
+              </span>
+              <span>−{{ money(b.discount) }}</span>
+            </div>
+            <div class="grand"><span>應收</span><span>{{ money(b.total) }}</span></div>
+          </div>
+
+          <div class="row discounts">
+            <span class="muted">打折</span>
+            <button
+              v-for="p in DISCOUNT_PRESETS"
+              :key="p.value"
+              class="tiny"
+              @click="setBillDiscount(b, 'percent', p.value)"
+            >
+              {{ p.label }}
+            </button>
+            <button class="tiny" @click="setBillDiscount(b, 'amount')">折抵金額</button>
+            <button class="tiny danger" @click="setBillDiscount(b, 'free')">整桌免單</button>
+            <button v-if="b.discount_type !== 'none'" class="tiny" @click="clearBillDiscount(b)">取消折扣</button>
+          </div>
+
           <div class="row">
             <button @click="printBill(b)">列印帳單</button>
             <button class="btn-ok" @click="closeBill(b, 'cash')">現金結帳</button>
@@ -440,13 +570,46 @@ onUnmounted(unsubscribe)
             取餐時間 {{ o.pickup_at || '盡快' }}　·　下單 {{ clockTime(o.created_at) }}
           </p>
 
-          <ul class="lines">
-            <li v-for="i in o.items" :key="i.id">
+          <ul class="lines items-list">
+            <li v-for="i in o.items" :key="i.id" :class="{ voided: i.voided }">
               <span class="muted">×{{ i.qty }}</span>
-              <span>{{ describeLine(i) }}</span>
+              <span>
+                {{ describeLine(i) }}
+                <em v-if="i.voided" class="void-tag">免單{{ i.void_reason ? `：${i.void_reason}` : '' }}</em>
+              </span>
               <span class="tabular">{{ money(i.price * i.qty) }}</span>
+              <button v-if="!o.paid_at" class="tiny" @click="toggleVoid(i, loadTakeout)">
+                {{ i.voided ? '恢復計費' : '免單' }}
+              </button>
             </li>
           </ul>
+
+          <div v-if="o.voidedAmount || o.discount" class="sums tabular">
+            <div v-if="o.voidedAmount"><span>免單項目</span><span>−{{ money(o.voidedAmount) }}</span></div>
+            <div v-if="o.discount" class="cut">
+              <span>
+                折扣（{{ discountLabel(o) }}）
+                <em v-if="o.discount_reason" class="muted">{{ o.discount_reason }}</em>
+              </span>
+              <span>−{{ money(o.discount) }}</span>
+            </div>
+            <div class="grand"><span>應收</span><span>{{ money(o.total) }}</span></div>
+          </div>
+
+          <div v-if="!o.paid_at && o.status !== 'cancelled'" class="row discounts">
+            <span class="muted">打折</span>
+            <button
+              v-for="p in DISCOUNT_PRESETS"
+              :key="p.value"
+              class="tiny"
+              @click="setOrderDiscount(o, 'percent', p.value)"
+            >
+              {{ p.label }}
+            </button>
+            <button class="tiny" @click="setOrderDiscount(o, 'amount')">折抵金額</button>
+            <button class="tiny danger" @click="setOrderDiscount(o, 'free')">整單免單</button>
+            <button v-if="o.discount_type !== 'none'" class="tiny" @click="clearOrderDiscount(o)">取消折扣</button>
+          </div>
 
           <div class="row">
             <template v-if="o.status === 'awaiting'">
@@ -476,6 +639,11 @@ onUnmounted(unsubscribe)
           <div class="card pad stat">
             <span class="muted">外帶（{{ report?.takeoutCount || 0 }} 單）</span>
             <strong class="tabular">{{ money(report?.takeoutRevenue || 0) }}</strong>
+          </div>
+          <!-- 打折跟免單送出去的錢，老闆一定要看得到 -->
+          <div class="card pad stat given">
+            <span class="muted">今日折讓（打折＋免單）</span>
+            <strong class="tabular">{{ money(report?.givenAway || 0) }}</strong>
           </div>
         </div>
         <section class="card pad backup">
@@ -555,11 +723,19 @@ onUnmounted(unsubscribe)
 
       <!-- 列印用帳單 -->
       <div v-if="printTarget" class="print-only receipt">
-        <h2>{{ printTarget.table.name }} 帳單</h2>
+        <h2>{{ shop?.name }}　{{ printTarget.table.name }} 帳單</h2>
         <table>
           <tr v-for="o in printTarget.orders" :key="o.id">
-            <td>{{ o.items.map(describeLine).join('、') }}</td>
+            <td>{{ o.items.filter((i) => !i.voided).map(describeLine).join('、') }}</td>
             <td class="num">{{ money(o.total) }}</td>
+          </tr>
+          <tr v-if="printTarget.voidedAmount">
+            <td>免單招待</td>
+            <td class="num">−{{ money(printTarget.voidedAmount) }}</td>
+          </tr>
+          <tr v-if="printTarget.discount">
+            <td>折扣（{{ discountLabel(printTarget) }}）</td>
+            <td class="num">−{{ money(printTarget.discount) }}</td>
           </tr>
           <tr class="grand">
             <td>合計</td>
@@ -776,6 +952,66 @@ code {
   grid-template-columns: 80px 1fr auto;
   gap: 12px;
 }
+/* 折扣與免單 */
+.items-list li {
+  grid-template-columns: 80px 1fr auto auto;
+  align-items: baseline;
+}
+/* 免單的項目留在單子上，劃掉就好——老闆要看得到今天送了什麼出去 */
+.items-list li.voided > span:nth-child(2),
+.items-list li.voided > span:nth-child(3) {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.void-tag {
+  font-style: normal;
+  font-size: 12px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  text-decoration: none;
+  display: inline-block;
+}
+.tiny {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.tiny.danger {
+  color: #b3261e;
+}
+.discounts {
+  align-items: center;
+  padding-top: 4px;
+}
+.sums {
+  margin: 12px 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sums div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sums .cut {
+  color: var(--brand);
+}
+.sums .grand {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 19px;
+  font-weight: 700;
+}
+.stat.given strong {
+  color: var(--brand);
+}
+
 /* 外帶訂單 */
 .takeout .total {
   font-size: 22px;

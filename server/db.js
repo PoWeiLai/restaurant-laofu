@@ -149,6 +149,32 @@ if (!orderCols.includes('type')) {
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_track ON orders(track_code)');
 
+// 折扣與免單。
+// 這些欄位都有預設值，直接 ADD COLUMN 就行，不必像外帶那次整張表重建。
+//
+// 兩個層級：
+//   單項免單 — 客訴補一碗、做壞了重做，那一項不收錢，但仍要留在單子上讓老闆看得到
+//   整單折扣 — 熟客打折、折抵定額、整桌招待
+// 折扣「值」一律存「折讓的百分比或金額」（percent=10 表示折掉一成，也就是打 9 折），
+// 不存折數，免得 9 折到底是折 9% 還是收 90% 每次都要想一次。
+const addColumn = (table, col, decl) => {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+};
+
+addColumn('order_items', 'voided', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('order_items', 'void_reason', "TEXT NOT NULL DEFAULT ''");
+
+for (const t of ['sessions', 'orders']) {
+  // none | percent（折讓成數）| amount（折抵定額）| free（整單免單）
+  addColumn(t, 'discount_type', "TEXT NOT NULL DEFAULT 'none'");
+  addColumn(t, 'discount_value', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn(t, 'discount_reason', "TEXT NOT NULL DEFAULT ''");
+}
+// 結帳時把當下折讓多少錢一起記下來，日後改了折扣設定也不影響已結的帳
+addColumn('sessions', 'discount_total', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('orders', 'discount_total', 'INTEGER NOT NULL DEFAULT 0');
+
 // 桌號 1-10
 const tableCount = db.prepare('SELECT COUNT(*) AS n FROM tables').get().n;
 if (tableCount === 0) {

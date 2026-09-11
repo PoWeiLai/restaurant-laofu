@@ -115,11 +115,64 @@ function optionGroupsOf(itemId) {
   const choices = db.prepare('SELECT * FROM option_choices WHERE group_id = ? ORDER BY sort, id');
   return groups.map((g) => ({ ...g, choices: choices.all(g.id) }));
 }
+/* ---------- 折扣與免單 ---------- */
+const DISCOUNT_TYPES = ['none', 'percent', 'amount', 'free'];
+
+/**
+ * 算折讓多少錢。
+ * percent 存的是「折讓成數」：10 代表折掉一成（也就是打 9 折）。
+ * 不存折數，免得每次都要想一下 9 折是折 9% 還是收 90%。
+ * 金額一律無條件捨去到整數元，且不會折成負數。
+ */
+function discountOf(base, type, value) {
+  if (base <= 0) return 0;
+  if (type === 'free') return base;
+  if (type === 'percent') return Math.round((base * Math.min(100, Math.max(0, value))) / 100);
+  if (type === 'amount') return Math.min(base, Math.max(0, Math.round(value)));
+  return 0;
+}
+
 function withItems(orders) {
   return orders.map((o) => {
     const items = itemsOf(o.id);
-    return { ...o, items, total: items.reduce((s, i) => s + i.price * i.qty, 0) };
+    const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
+    // 免單的項目留在單子上（廚房做過、老闆要看得到），但不計入金額
+    const voided = items.reduce((s, i) => (i.voided ? s + i.price * i.qty : s), 0);
+    const afterVoid = subtotal - voided;
+    // 外帶單自己就是一張帳單，折扣掛在單上；內用單的折扣掛在桌次上，在帳單那層才算
+    const discount =
+      o.type === 'takeout' ? discountOf(afterVoid, o.discount_type, o.discount_value) : 0;
+    return {
+      ...o,
+      items,
+      subtotal,
+      voidedAmount: voided,
+      discount,
+      /** 實際要收的錢 */
+      total: afterVoid - discount,
+    };
   });
+}
+
+/** 一張內用帳單（桌次）的金額：各單先扣掉免單項目，再套整桌的折扣 */
+function billOf(session) {
+  const orders = withItems(
+    db.prepare("SELECT * FROM orders WHERE session_id = ? AND status <> 'cancelled' ORDER BY id").all(session.id)
+  );
+  const subtotal = orders.reduce((s, o) => s + o.total, 0);
+  const voidedAmount = orders.reduce((s, o) => s + o.voidedAmount, 0);
+  const discount = discountOf(subtotal, session.discount_type, session.discount_value);
+  return {
+    ...session,
+    table: db.prepare('SELECT * FROM tables WHERE id = ?').get(session.table_id),
+    orders,
+    subtotal,
+    voidedAmount,
+    discount,
+    /** 老闆今天總共送出去多少錢：折扣加上免單的項目 */
+    givenAway: discount + voidedAmount,
+    total: subtotal - discount,
+  };
 }
 // 取得該桌目前未結帳的 session，沒有就開一個
 function openSession(tableId) {
@@ -174,12 +227,18 @@ app.get('/api/tables/:id/session', (req, res) => {
   const session = db
     .prepare('SELECT * FROM sessions WHERE table_id = ? AND closed_at IS NULL ORDER BY id DESC LIMIT 1')
     .get(tableId);
-  if (!session) return res.json({ table, session: null, orders: [], total: 0 });
+  if (!session) return res.json({ table, session: null, orders: [], subtotal: 0, discount: 0, total: 0 });
 
-  const orders = withItems(
-    db.prepare("SELECT * FROM orders WHERE session_id = ? AND status <> 'cancelled' ORDER BY id").all(session.id)
-  );
-  res.json({ table, session, orders, total: orders.reduce((s, o) => s + o.total, 0) });
+  // 用跟櫃檯結帳一樣的算法，客人看到的金額才會跟帳單一致（含免單與折扣）
+  const bill = billOf(session);
+  res.json({
+    table,
+    session,
+    orders: bill.orders,
+    subtotal: bill.subtotal,
+    discount: bill.discount,
+    total: bill.total,
+  });
 });
 
 // 送出訂單（內用掃桌號，外帶/遠端訂餐不需要桌號）
@@ -530,15 +589,82 @@ app.get('/api/admin/qrcodes', staffOnly, async (_req, res) => {
 /* ---------- 後台：帳單 / 結帳 ---------- */
 app.get('/api/admin/bills', staffOnly, (_req, res) => {
   const sessions = db.prepare('SELECT * FROM sessions WHERE closed_at IS NULL ORDER BY table_id').all();
-  res.json(
-    sessions.map((s) => {
-      const orders = withItems(
-        db.prepare("SELECT * FROM orders WHERE session_id = ? AND status <> 'cancelled' ORDER BY id").all(s.id)
-      );
-      const table = db.prepare('SELECT * FROM tables WHERE id = ?').get(s.table_id);
-      return { ...s, table, orders, total: orders.reduce((sum, o) => sum + o.total, 0) };
-    })
+  res.json(sessions.map(billOf));
+});
+
+/* ---------- 後台：折扣與免單 ---------- */
+// 單一品項免單：客訴補一碗、做壞了重做。項目留在單上，只是不算錢。
+app.patch('/api/admin/order-items/:id/void', staffOnly, (req, res) => {
+  const item = db.prepare('SELECT * FROM order_items WHERE id = ?').get(Number(req.params.id));
+  if (!item) return res.status(404).json({ error: '品項不存在' });
+
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(item.order_id);
+  if (order.session_id && db.prepare('SELECT closed_at FROM sessions WHERE id = ?').get(order.session_id)?.closed_at) {
+    return bad(res, '這張帳單已經結清，不能再改');
+  }
+  if (order.paid_at) return bad(res, '這張單已經收過款，不能再改');
+
+  const voided = req.body?.voided ? 1 : 0;
+  db.prepare('UPDATE order_items SET voided = ?, void_reason = ? WHERE id = ?').run(
+    voided,
+    voided ? String(req.body?.reason || '').slice(0, 100) : '',
+    item.id
   );
+  const updated = withItems([order])[0];
+  broadcast('order:update', updated);
+  broadcast('bill:update', {});
+  res.json(updated);
+});
+
+/** 讀出並檢查折扣設定，三種型態共用 */
+function readDiscount(body) {
+  const type = DISCOUNT_TYPES.includes(body?.type) ? body.type : null;
+  if (!type) return { error: '折扣方式不正確' };
+  let value = Math.round(Number(body?.value) || 0);
+  if (type === 'percent' && (value <= 0 || value > 100)) return { error: '折讓成數要在 1～100 之間' };
+  if (type === 'amount' && value <= 0) return { error: '折抵金額要大於 0' };
+  if (type === 'none' || type === 'free') value = 0;
+  // 招待、客訴補償這類事後要對帳，理由一律留著
+  return { type, value, reason: String(body?.reason || '').slice(0, 100) };
+}
+
+// 整桌折扣：熟客打折、折抵定額、整桌招待
+app.post('/api/admin/sessions/:id/discount', staffOnly, (req, res) => {
+  const s = db.prepare('SELECT * FROM sessions WHERE id = ?').get(Number(req.params.id));
+  if (!s) return res.status(404).json({ error: '帳單不存在' });
+  if (s.closed_at) return bad(res, '這張帳單已經結清，不能再改');
+
+  const d = readDiscount(req.body);
+  if (d.error) return bad(res, d.error);
+
+  db.prepare('UPDATE sessions SET discount_type = ?, discount_value = ?, discount_reason = ? WHERE id = ?').run(
+    d.type,
+    d.value,
+    d.reason,
+    s.id
+  );
+  broadcast('bill:update', {});
+  res.json(billOf(db.prepare('SELECT * FROM sessions WHERE id = ?').get(s.id)));
+});
+
+// 外帶單的折扣（外帶不走桌次，折扣掛在單上）
+app.post('/api/admin/orders/:id/discount', staffOnly, (req, res) => {
+  const o = db.prepare("SELECT * FROM orders WHERE id = ? AND type = 'takeout'").get(Number(req.params.id));
+  if (!o) return res.status(404).json({ error: '外帶訂單不存在' });
+  if (o.paid_at) return bad(res, '這張單已經收過款，不能再改');
+
+  const d = readDiscount(req.body);
+  if (d.error) return bad(res, d.error);
+
+  db.prepare('UPDATE orders SET discount_type = ?, discount_value = ?, discount_reason = ? WHERE id = ?').run(
+    d.type,
+    d.value,
+    d.reason,
+    o.id
+  );
+  const updated = withItems([db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id)])[0];
+  broadcast('order:update', updated);
+  res.json(updated);
 });
 
 // 外帶單不掛在桌次底下，各自收款，所以獨立一張清單
@@ -561,7 +687,13 @@ app.post('/api/admin/orders/:id/pay', staffOnly, (req, res) => {
   if (order.paid_at) return bad(res, '這張單已經收過款了');
 
   const payment = ['cash', 'card', 'mobile'].includes(req.body?.payment) ? req.body.payment : 'cash';
-  db.prepare('UPDATE orders SET paid_at = ?, payment = ? WHERE id = ?').run(now(), payment, order.id);
+  const bill = withItems([order])[0];
+  db.prepare('UPDATE orders SET paid_at = ?, payment = ?, discount_total = ? WHERE id = ?').run(
+    now(),
+    payment,
+    bill.discount + bill.voidedAmount, // 這張單總共送出去多少錢
+    order.id
+  );
   const updated = withItems([db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id)])[0];
   broadcast('order:update', updated);
   res.json(updated);
@@ -572,20 +704,17 @@ app.post('/api/admin/sessions/:id/close', staffOnly, (req, res) => {
   if (!s) return res.status(404).json({ error: '帳單不存在' });
   if (s.closed_at) return bad(res, '此帳單已結清');
 
-  const orders = withItems(
-    db.prepare("SELECT * FROM orders WHERE session_id = ? AND status <> 'cancelled'").all(s.id)
-  );
-  const total = orders.reduce((sum, o) => sum + o.total, 0);
+  const bill = billOf(s);
   const payment = ['cash', 'card', 'mobile'].includes(req.body?.payment) ? req.body.payment : 'cash';
 
-  db.prepare('UPDATE sessions SET closed_at = ?, paid_total = ?, payment = ? WHERE id = ?').run(
-    now(),
-    total,
-    payment,
-    s.id
-  );
-  broadcast('bill:closed', { sessionId: s.id, tableId: s.table_id, total });
-  res.json({ ok: true, total, payment });
+  // givenAway 是折扣加上免單項目，也就是這桌總共送出去多少錢。
+  // 當下就存起來，之後改了折扣設定也不會動到已經結清的帳。
+  db.prepare(
+    'UPDATE sessions SET closed_at = ?, paid_total = ?, payment = ?, discount_total = ? WHERE id = ?'
+  ).run(now(), bill.total, payment, bill.givenAway, s.id);
+
+  broadcast('bill:closed', { sessionId: s.id, tableId: s.table_id, total: bill.total });
+  res.json({ ok: true, total: bill.total, discount: bill.givenAway, payment });
 });
 
 // 今日營業摘要
@@ -597,7 +726,11 @@ app.get('/api/admin/report', staffOnly, (_req, res) => {
     .all();
   const top = db
     .prepare(
-      `SELECT oi.name AS name, SUM(oi.qty) AS qty, SUM(oi.qty * oi.price) AS amount
+      // 份數算「做了幾碗」（免單的也做了，廚房一樣要備料），
+      // 金額只算真的收到的錢，才對得上營業額
+      `SELECT oi.name AS name,
+              SUM(oi.qty) AS qty,
+              SUM(CASE WHEN oi.voided THEN 0 ELSE oi.qty * oi.price END) AS amount
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
        WHERE date(o.created_at,'localtime') = date('now','localtime') AND o.status <> 'cancelled'
@@ -605,24 +738,30 @@ app.get('/api/admin/report', staffOnly, (_req, res) => {
     )
     .all();
   // 外帶不走桌次帳單，營業額要另外加進來，否則老闆看到的數字是短少的
-  const takeoutPaid = db
-    .prepare(
-      `SELECT o.id, SUM(oi.price * oi.qty) AS total
-       FROM orders o JOIN order_items oi ON oi.order_id = o.id
-       WHERE o.type = 'takeout' AND o.paid_at IS NOT NULL
-         AND date(o.paid_at,'localtime') = date('now','localtime')
-       GROUP BY o.id`
-    )
-    .all();
+  const takeoutPaid = withItems(
+    db
+      .prepare(
+        `SELECT * FROM orders
+         WHERE type = 'takeout' AND paid_at IS NOT NULL
+           AND date(paid_at,'localtime') = date('now','localtime')`
+      )
+      .all()
+  );
+
+  const dineInRevenue = closed.reduce((s, c) => s + (c.paid_total || 0), 0);
+  const takeoutRevenue = takeoutPaid.reduce((s, o) => s + o.total, 0);
+  // 打折加上免單，老闆要知道今天總共送出去多少錢
+  const givenAway =
+    closed.reduce((s, c) => s + (c.discount_total || 0), 0) +
+    takeoutPaid.reduce((s, o) => s + (o.discount_total || 0), 0);
 
   res.json({
     closedCount: closed.length,
     takeoutCount: takeoutPaid.length,
-    dineInRevenue: closed.reduce((s, c) => s + (c.paid_total || 0), 0),
-    takeoutRevenue: takeoutPaid.reduce((s, o) => s + (o.total || 0), 0),
-    revenue:
-      closed.reduce((s, c) => s + (c.paid_total || 0), 0) +
-      takeoutPaid.reduce((s, o) => s + (o.total || 0), 0),
+    dineInRevenue,
+    takeoutRevenue,
+    revenue: dineInRevenue + takeoutRevenue,
+    givenAway,
     topItems: top,
   });
 });
@@ -688,12 +827,26 @@ function previewImage() {
   return row ? baseURL() + row.image : '';
 }
 
+/** 這個網址是哪一頁。分享連結時預覽要看得出來，而爬蟲只讀伺服器送出的 HTML。 */
+function pageInfo(reqPath, shopName) {
+  const table = reqPath.match(/^\/t\/(\d+)/);
+  if (table) return { name: `${table[1]} 號桌點餐`, desc: `${shopName}　${table[1]} 號桌線上點餐` };
+  if (reqPath.startsWith('/takeout')) {
+    return {
+      name: '外帶線上訂餐',
+      desc: `${shopName} 外帶線上訂餐：先點好、時間到再來拿，不用現場排隊。`,
+    };
+  }
+  if (reqPath.startsWith('/kitchen')) return { name: '廚房看板', desc: `${shopName} 廚房出單看板（店員專用）` };
+  if (reqPath.startsWith('/admin')) return { name: '後台管理', desc: `${shopName} 後台管理（店員專用）` };
+  return { name: '線上點餐', desc: `${shopName} 手機掃碼點餐、外帶線上訂餐` };
+}
+
 function renderIndex(reqPath) {
   const s = getSettings();
-  const title = `${s.shop_name} — 線上點餐`;
-  const desc = reqPath.startsWith('/takeout')
-    ? `${s.shop_name} 外帶線上訂餐：先點好、時間到再來拿，不用現場排隊。`
-    : `${s.shop_name} 手機掃碼點餐`;
+  const page = pageInfo(reqPath, s.shop_name);
+  const title = `${s.shop_name} — ${page.name}`;
+  const desc = page.desc;
 
   const image = previewImage();
   // 沒有 og:image 的話，LINE 的預覽就只有乾乾的一行字，看起來不像一家店

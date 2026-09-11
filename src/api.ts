@@ -47,11 +47,22 @@ export interface OrderItem {
   qty: number
   note: string
   options: ChosenOption[]
+  /** 這一項免單：做了但不收錢（客訴補一碗、做壞了重做），仍留在單上 */
+  voided: number
+  void_reason: string
+}
+
+/** percent 存折讓成數（10 = 折一成 = 打 9 折），amount 存折抵金額，free 為整單免單 */
+export type DiscountType = 'none' | 'percent' | 'amount' | 'free'
+export interface Discount {
+  discount_type: DiscountType
+  discount_value: number
+  discount_reason: string
 }
 /** awaiting 只有外帶會用到：店家開了「先確認再下廚」時，單子停在這一關等店員接單 */
 export type OrderStatus = 'awaiting' | 'pending' | 'preparing' | 'done' | 'cancelled'
 export type OrderType = 'dine_in' | 'takeout'
-export interface Order {
+export interface Order extends Discount {
   id: number
   type: OrderType
   /** 外帶單沒有桌次與桌號，兩個都是 null */
@@ -61,7 +72,15 @@ export interface Order {
   note: string
   created_at: string
   items: OrderItem[]
+  /** 原始金額（含免單的項目） */
+  subtotal: number
+  /** 免單項目合計 */
+  voidedAmount: number
+  /** 折扣金額；內用單的折扣掛在桌次上，這裡恆為 0 */
+  discount: number
+  /** 實際要收的錢 */
   total: number
+  discount_total: number
   /* 以下只有外帶單有值 */
   pickup_no: string
   track_code: string
@@ -91,13 +110,20 @@ export interface Table {
   name: string
   seats: number
 }
-export interface Bill {
+export interface Bill extends Discount {
   id: number
   table_id: number
   opened_at: string
   closed_at: string | null
   table: Table
   orders: Order[]
+  /** 扣掉免單項目後、套折扣前的金額 */
+  subtotal: number
+  voidedAmount: number
+  discount: number
+  /** 折扣加免單，這桌總共送出去多少錢 */
+  givenAway: number
+  /** 實際要收的錢 */
   total: number
 }
 export interface QrTable extends Table {
@@ -227,7 +253,20 @@ export const api = {
     request<{ baseURL: string; tables: QrTable[]; takeout: { url: string; qr: string } }>('/admin/qrcodes'),
   bills: () => request<Bill[]>('/admin/bills'),
   closeBill: (sessionId: number, payment: string) =>
-    request<{ ok: true; total: number }>(`/admin/sessions/${sessionId}/close`, { method: 'POST', body: { payment } }),
+    request<{ ok: true; total: number; discount: number }>(`/admin/sessions/${sessionId}/close`, {
+      method: 'POST',
+      body: { payment },
+    }),
+
+  /** 單一品項免單／取消免單 */
+  voidItem: (itemId: number, voided: boolean, reason = '') =>
+    request<Order>(`/admin/order-items/${itemId}/void`, { method: 'PATCH', body: { voided, reason } }),
+  /** 整桌折扣 */
+  discountBill: (sessionId: number, type: DiscountType, value = 0, reason = '') =>
+    request<Bill>(`/admin/sessions/${sessionId}/discount`, { method: 'POST', body: { type, value, reason } }),
+  /** 外帶單折扣（外帶不走桌次） */
+  discountOrder: (orderId: number, type: DiscountType, value = 0, reason = '') =>
+    request<Order>(`/admin/orders/${orderId}/discount`, { method: 'POST', body: { type, value, reason } }),
 
   takeoutOrders: () => request<Order[]>('/admin/takeout'),
   payTakeout: (orderId: number, payment: string) =>
@@ -244,6 +283,8 @@ export const api = {
       dineInRevenue: number
       takeoutRevenue: number
       revenue: number
+      /** 今天打折加免單，總共送出去多少錢 */
+      givenAway: number
       topItems: { name: string; qty: number; amount: number }[]
     }>('/admin/report'),
 }

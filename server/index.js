@@ -660,6 +660,17 @@ app.use('/images', express.static(IMAGES_DIR)); // 店家上傳的照片在永�
 app.use(express.static(join(ROOT, 'public')));
 // index: false 很重要：否則 static 會直接把 dist/index.html 當首頁送出去，
 // 走不到下面填店名的那段，「/」的標題就會是沒有店名的後備文字。
+//
+// dist/assets 底下的檔名都帶內容雜湊（改了內容就換檔名），可以讓瀏覽器永久留著。
+// 預設的 max-age=0 會讓客人每次開頁面都回來問一輪「這幾支檔案變了沒」，
+// 對休眠中的免費主機來說每一趟都是額外等待。
+app.use(
+  '/assets',
+  express.static(join(DIST, 'assets'), {
+    immutable: true,
+    maxAge: '1y',
+  })
+);
 app.use(express.static(DIST, { index: false }));
 
 /**
@@ -691,6 +702,9 @@ const escapeHtml = (s) =>
 // SPA fallback：/kitchen、/admin、/t/3 等前端路由都回 index.html
 app.get(/^(?!\/api\/).*/, (req, res, next) => {
   if (!existsSync(join(DIST, 'index.html'))) return next(); // 尚未 npm run build（開發時走 vite）
+  // 這份 HTML 帶著店名，是會變的內容，不能讓瀏覽器留著舊的：
+  // 店家改了店名，回頭客的分頁標題還是舊招牌。JS/CSS 檔名有雜湊，照樣可以長期快取。
+  res.set('Cache-Control', 'no-store');
   res.type('html').send(renderIndex(req.path));
 });
 

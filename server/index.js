@@ -680,6 +680,14 @@ app.use(express.static(DIST, { index: false }));
  * 不會執行 JavaScript，只讀原始 HTML。店家把店名改掉之後，分享出去的連結若還顯示舊名字，
  * 對「拿這套 demo 給不同餐廳看」來說就是破綻。
  */
+/** 連結預覽的縮圖：拿菜單第一張有照片的菜色，店家換了照片預覽就跟著換 */
+function previewImage() {
+  const row = db
+    .prepare("SELECT image FROM menu_items WHERE image <> '' AND available = 1 ORDER BY sort, id LIMIT 1")
+    .get();
+  return row ? baseURL() + row.image : '';
+}
+
 function renderIndex(reqPath) {
   const s = getSettings();
   const title = `${s.shop_name} — 線上點餐`;
@@ -687,13 +695,23 @@ function renderIndex(reqPath) {
     ? `${s.shop_name} 外帶線上訂餐：先點好、時間到再來拿，不用現場排隊。`
     : `${s.shop_name} 手機掃碼點餐`;
 
+  const image = previewImage();
+  // 沒有 og:image 的話，LINE 的預覽就只有乾乾的一行字，看起來不像一家店
+  const extra =
+    `  <meta property="og:site_name" content="${escapeHtml(s.shop_name)}" />\n` +
+    `  <meta property="og:url" content="${escapeHtml(baseURL() + reqPath)}" />\n` +
+    (image
+      ? `  <meta property="og:image" content="${escapeHtml(image)}" />\n` +
+        `  <meta name="twitter:card" content="summary_large_image" />\n`
+      : '');
+
   return readFileSync(join(DIST, 'index.html'), 'utf8')
     .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
     .replace(
       /(<meta (?:name="description"|property="og:title"|property="og:description") content=")[^"]*(")/g,
       (_m, head, tail) => head + escapeHtml(head.includes('og:title') ? title : desc) + tail
     )
-    .replace('</head>', `  <meta property="og:url" content="${escapeHtml(baseURL() + reqPath)}" />\n  </head>`);
+    .replace('</head>', `${extra}  </head>`);
 }
 
 const escapeHtml = (s) =>

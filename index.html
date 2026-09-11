@@ -5,7 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#8a140f" />
-    <title>好味牛肉麵 — 線上點餐</title>
+    <!--
+      店名由伺服器在送出這頁時填進來（見 server/index.js 的 renderIndex）。
+      寫死在這裡的話，店家在後台改了店名，分頁標題和 LINE 的連結預覽還是舊的——
+      LINE／FB 的爬蟲不會執行 JavaScript，只讀原始 HTML。
+      下面這些值是沒有資料庫時的後備文字。
+    -->
+    <title>線上點餐</title>
+    <meta name="description" content="手機掃碼點餐、外帶線上訂餐" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="線上點餐" />
+    <meta property="og:description" content="手機掃碼點餐、外帶線上訂餐" />
   </head>
   <body>
     <div id="app"></div>

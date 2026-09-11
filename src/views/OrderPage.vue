@@ -10,7 +10,8 @@ import {
   type MenuItem,
   type Order,
   type OptionChoice,
-  type Shop,
+  refreshShop,
+  useShopTitle,
 } from '../api'
 import { rememberTakeout } from '../takeout'
 
@@ -23,7 +24,7 @@ const isTakeout = computed(() => props.mode === 'takeout')
 const tableNo = computed(() => Number(props.tableId))
 const router = useRouter()
 
-const shop = ref<Shop | null>(null)
+const shop = useShopTitle(props.mode === 'takeout' ? '外帶線上訂餐' : '線上點餐')
 const categories = ref<Category[]>([])
 const activeCat = ref<number | null>(null)
 const myOrders = ref<Order[]>([])
@@ -172,10 +173,6 @@ const pickupSlots = computed(() => {
 const phoneLooksValid = computed(() => /^[0-9+\-() ]{8,20}$/.test(customer.phone.trim()))
 const canSubmitTakeout = computed(() => customer.name.trim() !== '' && phoneLooksValid.value)
 
-async function loadShop() {
-  shop.value = await api.shop()
-}
-
 async function loadMenu() {
   categories.value = await api.menu()
   if (activeCat.value === null) activeCat.value = categories.value[0]?.id ?? null
@@ -249,7 +246,7 @@ watch(
     loading.value = true
     error.value = ''
     try {
-      await Promise.all([loadShop(), loadMenu(), loadOrders()])
+      await Promise.all([refreshShop(), loadMenu(), loadOrders()])
     } catch (e) {
       error.value = e instanceof Error ? e.message : '載入失敗'
     } finally {
@@ -270,7 +267,7 @@ const unsubscribe = subscribe({
     }
   },
   'menu:update': () => loadMenu(),
-  'shop:update': () => loadShop(),
+  'shop:update': () => refreshShop(),
 })
 onUnmounted(unsubscribe)
 </script>

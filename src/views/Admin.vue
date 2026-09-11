@@ -7,7 +7,9 @@ import {
   clockTime,
   downloadBackup,
   money,
+  refreshShop,
   subscribe,
+  useShopTitle,
   type Bill,
   type Category,
   type MenuItem,
@@ -22,6 +24,7 @@ const describeLine = (i: OrderItem) =>
   `${i.name}${i.options.length ? `（${i.options.map((o) => o.name).join('／')}）` : ''}×${i.qty}`
 
 type Tab = 'menu' | 'qrcode' | 'bills' | 'takeout' | 'report' | 'settings'
+const shop = useShopTitle('後台管理')
 const tab = ref<Tab>('menu')
 const TABS: { id: Tab; label: string }[] = [
   { id: 'menu', label: '菜單管理' },
@@ -209,6 +212,7 @@ async function saveSettings() {
   settingsBusy.value = true
   await run(async () => {
     settings.value = await api.saveSettings(settings.value!)
+    await refreshShop() // 抬頭與分頁標題跟著改掉的店名走
   }, '設定已儲存，客人端會立刻更新')
   settingsBusy.value = false
 }
@@ -265,7 +269,7 @@ onUnmounted(unsubscribe)
   <StaffGate @unlocked="start">
     <div class="admin">
       <header class="bar no-print">
-        <h1>後台管理</h1>
+        <h1><span class="shop">{{ shop?.name }}</span>後台管理</h1>
         <nav>
           <button v-for="t in TABS" :key="t.id" :class="{ on: tab === t.id }" @click="openTab(t.id)">
             {{ t.label }}
@@ -573,6 +577,14 @@ onUnmounted(unsubscribe)
 .admin {
   min-height: 100vh;
   padding-bottom: 40px;
+}
+/* 店名放在抬頭，一眼看得出正在管哪一家店 */
+.shop {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: var(--brand);
 }
 .bar {
   position: sticky;

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 export interface OptionChoice {
   id: number
@@ -273,6 +273,34 @@ export function subscribe(handlers: Record<string, (data: any) => void>): () => 
     es.addEventListener(type, (e) => fn(JSON.parse((e as MessageEvent).data || '{}')))
   }
   return () => es.close()
+}
+
+/**
+ * 全站共用的店家資料。
+ *
+ * 店名會出現在每一頁的抬頭和瀏覽器分頁標題上，而且是店家在後台自己填的，
+ * 所以集中在這裡載一次給各頁共用，不要每頁各寫一份、更不要寫死在樣板裡。
+ * （伺服器送出 HTML 時也會把店名填進 <title>，那是給不會跑 JS 的 LINE／FB 連結預覽爬蟲看的。）
+ */
+const shopRef = ref<Shop | null>(null)
+let shopLoading: Promise<unknown> | null = null
+
+export function refreshShop() {
+  shopLoading = api.shop().then((s) => (shopRef.value = s))
+  return shopLoading.catch(() => undefined) // 載不到就維持原樣，不要讓整頁掛掉
+}
+
+/** 取得店家資料，順便把瀏覽器分頁標題設成「店名 — 這一頁是什麼」 */
+export function useShopTitle(pageName = '線上點餐') {
+  if (!shopLoading) refreshShop()
+  watch(
+    shopRef,
+    (s) => {
+      if (s) document.title = `${s.name} — ${pageName}`
+    },
+    { immediate: true }
+  )
+  return shopRef
 }
 
 export const money = (n: number) => `$${n.toLocaleString('zh-TW')}`

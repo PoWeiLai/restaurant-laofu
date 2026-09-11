@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api, type Shop, type Table } from '../api'
+import { api, useShopTitle, type Table } from '../api'
 
+// 店名等資料都在後台「店家設定」裡，這裡不寫死
+const shop = useShopTitle('線上點餐')
 const tables = ref<Table[]>([])
-const shop = ref<Shop | null>(null)
 onMounted(async () => {
-  // 店名等資料都在後台「店家設定」裡，這裡不寫死
-  ;[shop.value, tables.value] = await Promise.all([api.shop(), api.tables()])
+  tables.value = await api.tables()
 })
 </script>
 

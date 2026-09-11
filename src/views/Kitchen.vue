@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import StaffGate from '../components/StaffGate.vue'
-import { api, clockTime, subscribe, type Order } from '../api'
+import { api, clockTime, subscribe, useShopTitle, type Order } from '../api'
 
+const shop = useShopTitle('廚房出單看板')
 const orders = ref<Order[]>([])
 const error = ref('')
 const soundOn = ref(true)
@@ -107,7 +108,7 @@ onUnmounted(() => {
   <StaffGate @unlocked="start">
     <div class="kitchen">
       <header class="bar">
-        <h1>廚房出單看板</h1>
+        <h1><span class="shop">{{ shop?.name }}</span>廚房出單看板</h1>
         <div class="meta">
           <span class="count">待製作 {{ pending.length }}</span>
           <span class="count">製作中 {{ preparing.length }}</span>
@@ -197,6 +198,14 @@ onUnmounted(() => {
 .kitchen {
   min-height: 100vh;
   padding-bottom: 32px;
+}
+/* 店名放在看板抬頭，一眼看得出是哪一家店（同一台平板可能開過不同店的 demo） */
+.shop {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: var(--brand);
 }
 .bar {
   position: sticky;

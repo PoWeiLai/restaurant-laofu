@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { api, clockTime, money, subscribe, type Order, type Shop } from '../api'
+import { api, clockTime, money, refreshShop, subscribe, useShopTitle, type Order } from '../api'
 import { myTakeoutCodes } from '../takeout'
 
 /**
@@ -11,7 +11,8 @@ import { myTakeoutCodes } from '../takeout'
 const props = defineProps<{ code: string }>()
 const isMine = computed(() => props.code === 'mine')
 
-const shop = ref<Shop | null>(null)
+const shop = useShopTitle('外帶訂單進度')
+
 const orders = ref<Order[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -40,7 +41,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    shop.value = await api.shop()
+    await refreshShop()
     const codes = isMine.value ? myTakeoutCodes() : [props.code]
     if (codes.length === 0) {
       orders.value = []

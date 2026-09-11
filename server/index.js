@@ -3,7 +3,7 @@ import multer from 'multer';
 import QRCode from 'qrcode';
 import os from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, getSettings, now, saveSettings } from './db.js';
@@ -658,13 +658,40 @@ app.get('/api/admin/backup', staffOnly, (_req, res) => {
 const DIST = join(ROOT, 'dist');
 app.use('/images', express.static(IMAGES_DIR)); // 店家上傳的照片在永久儲存空間，優先
 app.use(express.static(join(ROOT, 'public')));
-app.use(express.static(DIST));
+// index: false 很重要：否則 static 會直接把 dist/index.html 當首頁送出去，
+// 走不到下面填店名的那段，「/」的標題就會是沒有店名的後備文字。
+app.use(express.static(DIST, { index: false }));
+
+/**
+ * 把店名填進 index.html 的標題與連結預覽標籤。
+ *
+ * 為什麼不在前端用 JavaScript 改 document.title 就好：LINE、Facebook 這些的連結預覽爬蟲
+ * 不會執行 JavaScript，只讀原始 HTML。店家把店名改掉之後，分享出去的連結若還顯示舊名字，
+ * 對「拿這套 demo 給不同餐廳看」來說就是破綻。
+ */
+function renderIndex(reqPath) {
+  const s = getSettings();
+  const title = `${s.shop_name} — 線上點餐`;
+  const desc = reqPath.startsWith('/takeout')
+    ? `${s.shop_name} 外帶線上訂餐：先點好、時間到再來拿，不用現場排隊。`
+    : `${s.shop_name} 手機掃碼點餐`;
+
+  return readFileSync(join(DIST, 'index.html'), 'utf8')
+    .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
+    .replace(
+      /(<meta (?:name="description"|property="og:title"|property="og:description") content=")[^"]*(")/g,
+      (_m, head, tail) => head + escapeHtml(head.includes('og:title') ? title : desc) + tail
+    )
+    .replace('</head>', `  <meta property="og:url" content="${escapeHtml(baseURL() + reqPath)}" />\n  </head>`);
+}
+
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 // SPA fallback：/kitchen、/admin、/t/3 等前端路由都回 index.html
-app.get(/^(?!\/api\/).*/, (_req, res, next) => {
-  const index = join(DIST, 'index.html');
-  if (!existsSync(index)) return next(); // 尚未 npm run build（開發時走 vite）
-  res.sendFile(index);
+app.get(/^(?!\/api\/).*/, (req, res, next) => {
+  if (!existsSync(join(DIST, 'index.html'))) return next(); // 尚未 npm run build（開發時走 vite）
+  res.type('html').send(renderIndex(req.path));
 });
 
 app.listen(PORT, '0.0.0.0', () => {

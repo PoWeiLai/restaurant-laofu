@@ -64,13 +64,29 @@ CREATE TABLE IF NOT EXISTS sessions (
   payment    TEXT
 );
 
+-- 內用單掛在桌次 session 底下；外帶單沒有桌號也沒有 session，兩個欄位都是 NULL
 CREATE TABLE IF NOT EXISTS orders (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  table_id   INTEGER NOT NULL REFERENCES tables(id),
+  type       TEXT NOT NULL DEFAULT 'dine_in',  -- dine_in=內用 | takeout=外帶自取
+  session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+  table_id   INTEGER REFERENCES tables(id),
   status     TEXT NOT NULL DEFAULT 'pending',  -- pending | preparing | done | cancelled
   note       TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- 以下只有外帶單會填
+  pickup_no      TEXT NOT NULL DEFAULT '',  -- 取餐號，當天唯一，客人到店報這個號碼
+  track_code     TEXT NOT NULL DEFAULT '',  -- 查詢碼，客人用它看自己這張單的進度
+  customer_name  TEXT NOT NULL DEFAULT '',
+  customer_phone TEXT NOT NULL DEFAULT '',
+  pickup_at      TEXT NOT NULL DEFAULT '',  -- 預約取餐時間（HH:MM），空字串=盡快
+  paid_at        TEXT,                      -- 外帶單各自收款，不走桌次帳單
+  payment        TEXT
+);
+
+-- 店家自己的資料（店名、電話…），一列一個設定，讓店家在後台改而不必動程式
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -96,6 +112,43 @@ if (!orderItemCols.includes('options')) {
   db.exec("ALTER TABLE order_items ADD COLUMN options TEXT NOT NULL DEFAULT '[]'");
 }
 
+// 舊資料庫升級到外帶版本。
+// 外帶單沒有桌號，但舊 schema 的 session_id / table_id 是 NOT NULL；SQLite 的 ALTER TABLE
+// 改不掉 NOT NULL，只能照官方建議整張表重建再把資料搬過去。
+const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+if (!orderCols.includes('type')) {
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  db.exec(`
+    CREATE TABLE orders_new (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      type       TEXT NOT NULL DEFAULT 'dine_in',
+      session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+      table_id   INTEGER REFERENCES tables(id),
+      status     TEXT NOT NULL DEFAULT 'pending',
+      note       TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      pickup_no      TEXT NOT NULL DEFAULT '',
+      track_code     TEXT NOT NULL DEFAULT '',
+      customer_name  TEXT NOT NULL DEFAULT '',
+      customer_phone TEXT NOT NULL DEFAULT '',
+      pickup_at      TEXT NOT NULL DEFAULT '',
+      paid_at        TEXT,
+      payment        TEXT
+    );
+    INSERT INTO orders_new (id, type, session_id, table_id, status, note, created_at)
+      SELECT id, 'dine_in', session_id, table_id, status, note, created_at FROM orders;
+    DROP TABLE orders;
+    ALTER TABLE orders_new RENAME TO orders;
+    CREATE INDEX IF NOT EXISTS idx_orders_session ON orders(session_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders(status);
+  `);
+  db.exec('COMMIT');
+  db.exec('PRAGMA foreign_keys = ON');
+  console.log('  資料庫已升級：訂單表新增外帶欄位');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_orders_track ON orders(track_code)');
+
 // 桌號 1-10
 const tableCount = db.prepare('SELECT COUNT(*) AS n FROM tables').get().n;
 if (tableCount === 0) {
@@ -105,4 +158,41 @@ if (tableCount === 0) {
 
 export function now() {
   return new Date().toISOString();
+}
+
+/* ---------- 店家設定 ---------- */
+// 店名、電話這些每家店都不一樣的資料放資料庫，讓店家在後台自己填。
+// 寫死在程式裡的話，換一家店試用就得改程式重新部署一次。
+export const SETTING_DEFAULTS = {
+  shop_name: '好味牛肉麵',
+  shop_phone: '02-1234-5678',
+  shop_address: '新北市示範區美食路88號',
+  takeout_enabled: '1', // 外帶／遠端訂餐開關，店家忙不過來時可以關掉
+  takeout_lead_minutes: '20', // 最快多久可以取餐，用來算預約時間的最早選項
+  // 外帶怕客人放鴿子：開這個，單子會先停在「待接單」等店員確認，確認後才進廚房
+  takeout_confirm_first: '0',
+  // 外帶是否開放線上先付款（關掉就只能到店付款）
+  payment_online: '0',
+  // mock = 示範用的模擬付款，按下去就當作成功，不會真的收錢；
+  // 要真的收錢得接金流（綠界／藍新／LINE Pay），見 server/index.js 的 pay-online
+  payment_provider: 'mock',
+};
+
+const insSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+for (const [key, value] of Object.entries(SETTING_DEFAULTS)) insSetting.run(key, value);
+
+export function getSettings() {
+  const saved = db.prepare('SELECT key, value FROM settings').all();
+  return { ...SETTING_DEFAULTS, ...Object.fromEntries(saved.map((r) => [r.key, r.value])) };
+}
+
+/** 只接受認得的設定鍵，避免前端亂塞東西進資料庫 */
+export function saveSettings(patch) {
+  const stmt = db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  );
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (key in SETTING_DEFAULTS && value != null) stmt.run(key, String(value).trim());
+  }
+  return getSettings();
 }

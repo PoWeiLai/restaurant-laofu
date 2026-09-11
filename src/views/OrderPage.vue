@@ -1,10 +1,29 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
-import { api, money, subscribe, type Category, type MenuItem, type Order, type OptionChoice } from '../api'
+import { useRouter } from 'vue-router'
+import {
+  api,
+  money,
+  subscribe,
+  type CartPayload,
+  type Category,
+  type MenuItem,
+  type Order,
+  type OptionChoice,
+  type Shop,
+} from '../api'
+import { rememberTakeout } from '../takeout'
 
-const props = defineProps<{ tableId: string }>()
+/**
+ * 客人點餐頁。內用與外帶共用同一份菜單、選項與購物車，只有「這張單要送去哪裡」不同：
+ * 內用綁桌號、吃完一起結帳；外帶留姓名電話、給取餐號、到店付款。
+ */
+const props = defineProps<{ mode?: 'dine_in' | 'takeout'; tableId?: string }>()
+const isTakeout = computed(() => props.mode === 'takeout')
 const tableNo = computed(() => Number(props.tableId))
+const router = useRouter()
 
+const shop = ref<Shop | null>(null)
 const categories = ref<Category[]>([])
 const activeCat = ref<number | null>(null)
 const myOrders = ref<Order[]>([])
@@ -13,7 +32,15 @@ const error = ref('')
 const toast = ref('')
 const view = ref<'menu' | 'orders'>('menu')
 const cartOpen = ref(false)
+const checkoutOpen = ref(false)
 const submitting = ref(false)
+
+/** 試用期已過或店家關掉外帶時，菜單照看但不能送單 */
+const closedReason = computed(() => {
+  if (shop.value?.trial?.expired) return '系統試用期已結束，目前暫停接單'
+  if (isTakeout.value && shop.value && !shop.value.takeoutEnabled) return '本店目前暫停外帶接單，敬請見諒'
+  return ''
+})
 
 interface CartLine {
   key: string
@@ -31,6 +58,7 @@ const cartTotal = computed(() => cart.reduce((s, l) => s + unitPrice(l.item, l.c
 const orderedTotal = computed(() => myOrders.value.reduce((s, o) => s + o.total, 0))
 
 const STATUS_TEXT: Record<string, string> = {
+  awaiting: '已送出，等待店家接單',
   pending: '已送出，等待廚房確認',
   preparing: '廚房製作中',
   done: '已完成出餐',
@@ -117,34 +145,97 @@ function setQty(line: CartLine, qty: number) {
 const countInCart = (itemId: number) =>
   cart.filter((l) => l.item.id === itemId).reduce((s, l) => s + l.qty, 0)
 
+const cartPayload = (): CartPayload[] =>
+  cart.map((l) => ({
+    itemId: l.item.id,
+    qty: l.qty,
+    note: l.note,
+    choiceIds: l.choices.map((c) => c.id),
+  }))
+
+/* ---------- 外帶：取餐人與取餐時間 ---------- */
+const customer = reactive({ name: '', phone: '' })
+const pickupAt = ref('') // 空字串 = 盡快
+const payWay = ref<'counter' | 'online'>('counter')
+
+/** 可選的取餐時段：從「現在＋備餐時間」開始，每 10 分鐘一格，排到兩小時後 */
+const pickupSlots = computed(() => {
+  const lead = shop.value?.takeoutLeadMinutes ?? 20
+  const start = new Date(Date.now() + lead * 60000)
+  start.setMinutes(Math.ceil(start.getMinutes() / 10) * 10, 0, 0)
+  return Array.from({ length: 12 }, (_, i) => {
+    const t = new Date(start.getTime() + i * 10 * 60000)
+    return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
+  })
+})
+
+const phoneLooksValid = computed(() => /^[0-9+\-() ]{8,20}$/.test(customer.phone.trim()))
+const canSubmitTakeout = computed(() => customer.name.trim() !== '' && phoneLooksValid.value)
+
+async function loadShop() {
+  shop.value = await api.shop()
+}
+
 async function loadMenu() {
   categories.value = await api.menu()
   if (activeCat.value === null) activeCat.value = categories.value[0]?.id ?? null
 }
 
 async function loadOrders() {
+  if (isTakeout.value) return // 外帶單送出後直接跳到進度頁，這裡不需要清單
   const data = await api.tableSession(tableNo.value)
   myOrders.value = data.orders
 }
 
+/** 內用：直接送進廚房，吃完再一起結帳 */
+async function submitDineIn() {
+  await api.placeOrder(tableNo.value, cartPayload())
+  cart.splice(0, cart.length)
+  cartOpen.value = false
+  await loadOrders()
+  view.value = 'orders'
+  say('訂單已送出，廚房已收到 🍜')
+}
+
+/** 外帶：留下取餐人資料，拿到取餐號，線上付款或到店付款 */
+async function submitTakeout() {
+  const order = await api.placeTakeout(
+    { name: customer.name.trim(), phone: customer.phone.trim() },
+    cartPayload(),
+    pickupAt.value
+  )
+  rememberTakeout(order.track_code)
+  cart.splice(0, cart.length)
+  checkoutOpen.value = false
+  cartOpen.value = false
+
+  // 訂單已經成立，線上付款失敗不該把單子弄丟——付款收不到就照常到店付
+  if (payWay.value === 'online' && shop.value?.paymentOnline) {
+    try {
+      await api.payTakeoutOnline(order.track_code)
+    } catch (e) {
+      say(e instanceof Error ? e.message : '線上付款未完成，請到店付款')
+    }
+  }
+  router.push(`/takeout/${order.track_code}`)
+}
+
 async function submit() {
   if (cart.length === 0) return
+  if (closedReason.value) return say(closedReason.value)
+  // 外帶要先填取餐人資料，第一次按送出先打開結帳表單
+  if (isTakeout.value && !checkoutOpen.value) {
+    cartOpen.value = false
+    checkoutOpen.value = true
+    return
+  }
+  if (isTakeout.value && !canSubmitTakeout.value) {
+    return say(customer.name.trim() ? '請填寫正確的連絡電話' : '請填寫取餐人姓名')
+  }
+
   submitting.value = true
   try {
-    await api.placeOrder(
-      tableNo.value,
-      cart.map((l) => ({
-        itemId: l.item.id,
-        qty: l.qty,
-        note: l.note,
-        choiceIds: l.choices.map((c) => c.id),
-      }))
-    )
-    cart.splice(0, cart.length)
-    cartOpen.value = false
-    await loadOrders()
-    view.value = 'orders'
-    say('訂單已送出，廚房已收到 🍜')
+    await (isTakeout.value ? submitTakeout() : submitDineIn())
   } catch (e) {
     say(e instanceof Error ? e.message : '送出失敗，請再試一次')
   } finally {
@@ -153,12 +244,12 @@ async function submit() {
 }
 
 watch(
-  tableNo,
+  [tableNo, isTakeout],
   async () => {
     loading.value = true
     error.value = ''
     try {
-      await Promise.all([loadMenu(), loadOrders()])
+      await Promise.all([loadShop(), loadMenu(), loadOrders()])
     } catch (e) {
       error.value = e instanceof Error ? e.message : '載入失敗'
     } finally {
@@ -170,15 +261,16 @@ watch(
 
 const unsubscribe = subscribe({
   'order:update': (o: Order) => {
-    if (o.table_id === tableNo.value) loadOrders()
+    if (!isTakeout.value && o.table_id === tableNo.value) loadOrders()
   },
   'bill:closed': (b: { tableId: number }) => {
-    if (b.tableId === tableNo.value) {
+    if (!isTakeout.value && b.tableId === tableNo.value) {
       myOrders.value = []
       say('本桌已結帳，感謝光臨！')
     }
   },
   'menu:update': () => loadMenu(),
+  'shop:update': () => loadShop(),
 })
 onUnmounted(unsubscribe)
 </script>
@@ -187,16 +279,23 @@ onUnmounted(unsubscribe)
   <div class="page">
     <header class="top">
       <div>
-        <div class="shop small">老福家常牛肉麵</div>
-        <h1>{{ tableNo }} 號桌</h1>
+        <div class="shop small">{{ shop?.name || '線上點餐' }}</div>
+        <h1 v-if="isTakeout">外帶自取</h1>
+        <h1 v-else>{{ tableNo }} 號桌</h1>
       </div>
       <div class="switch">
         <button :class="{ on: view === 'menu' }" @click="view = 'menu'">菜單</button>
-        <button :class="{ on: view === 'orders' }" @click="view = 'orders'">
+        <button v-if="!isTakeout" :class="{ on: view === 'orders' }" @click="view = 'orders'">
           已點餐點<span v-if="myOrders.length" class="dot">{{ myOrders.length }}</span>
         </button>
+        <RouterLink v-else to="/takeout/mine" class="mine">我的訂單</RouterLink>
       </div>
     </header>
+
+    <p v-if="closedReason" class="notice">{{ closedReason }}</p>
+    <p v-else-if="isTakeout && shop" class="notice soft">
+      線上點好、時間到再來拿，不用現場排隊。備餐約 {{ shop.takeoutLeadMinutes }} 分鐘，到店取餐時付款。
+    </p>
 
     <p v-if="loading" class="state muted">菜單載入中…</p>
     <p v-else-if="error" class="state error">{{ error }}</p>
@@ -239,7 +338,7 @@ onUnmounted(unsubscribe)
       </main>
     </template>
 
-    <!-- 已點餐點 -->
+    <!-- 已點餐點（內用） -->
     <main v-else class="list">
       <p v-if="myOrders.length === 0" class="state muted">本桌還沒有訂單，先去菜單點餐吧</p>
       <article v-for="o in myOrders" :key="o.id" class="card order">
@@ -331,13 +430,81 @@ onUnmounted(unsubscribe)
       </div>
       <footer class="sheet-foot">
         <div class="tabular">合計 <strong>{{ money(cartTotal) }}</strong></div>
-        <button class="btn-primary big" :disabled="submitting" @click="submit">
+        <button class="btn-primary big" :disabled="submitting || !!closedReason" @click="submit">
+          {{ isTakeout ? '下一步：填取餐資料' : submitting ? '送出中…' : '送出訂單' }}
+        </button>
+      </footer>
+    </section>
+
+    <!-- 外帶：取餐人資料 -->
+    <div v-if="checkoutOpen" class="scrim" @click="checkoutOpen = false"></div>
+    <section v-if="checkoutOpen" class="sheet">
+      <header>
+        <h2>取餐資料</h2>
+        <button @click="checkoutOpen = false">返回</button>
+      </header>
+      <div class="sheet-body">
+        <label class="field">
+          <span>取餐人姓名<b>＊</b></span>
+          <input v-model="customer.name" placeholder="例：王小明" autocomplete="name" />
+        </label>
+        <label class="field">
+          <span>連絡電話<b>＊</b></span>
+          <!-- 電話用 tel 鍵盤；姓名不設，否則手機打不出中文 -->
+          <input v-model="customer.phone" type="tel" inputmode="tel" placeholder="例：0912345678" autocomplete="tel" />
+          <em v-if="customer.phone && !phoneLooksValid" class="warn-text">電話號碼格式看起來不對</em>
+        </label>
+        <div class="field">
+          <span>取餐時間</span>
+          <div class="choices">
+            <button class="choice" :class="{ on: pickupAt === '' }" @click="pickupAt = ''">盡快</button>
+            <button
+              v-for="t in pickupSlots"
+              :key="t"
+              class="choice tabular"
+              :class="{ on: pickupAt === t }"
+              @click="pickupAt = t"
+            >
+              {{ t }}
+            </button>
+          </div>
+        </div>
+        <div v-if="shop?.paymentOnline" class="field">
+          <span>付款方式</span>
+          <div class="choices">
+            <button class="choice" :class="{ on: payWay === 'counter' }" @click="payWay = 'counter'">
+              到店付款
+            </button>
+            <button class="choice" :class="{ on: payWay === 'online' }" @click="payWay = 'online'">
+              線上先付
+            </button>
+          </div>
+          <em v-if="payWay === 'online' && shop.paymentProvider === 'mock'" class="warn-text">
+            目前是示範用的模擬付款，不會真的扣款
+          </em>
+        </div>
+
+        <div class="recap">
+          <div v-for="l in cart" :key="l.key" class="recap-line">
+            <span>{{ l.item.name }} ×{{ l.qty }}</span>
+            <span class="tabular">{{ money(unitPrice(l.item, l.choices) * l.qty) }}</span>
+          </div>
+        </div>
+        <p class="muted small">送出後會給你一組取餐號，到店報號碼就能取餐。</p>
+      </div>
+      <footer class="sheet-foot">
+        <div class="tabular">合計 <strong>{{ money(cartTotal) }}</strong></div>
+        <button class="btn-primary big" :disabled="submitting || !canSubmitTakeout" @click="submit">
           {{ submitting ? '送出中…' : '送出訂單' }}
         </button>
       </footer>
     </section>
 
-    <button v-if="cartCount && !cartOpen && !picking" class="cartbar btn-primary" @click="cartOpen = true">
+    <button
+      v-if="cartCount && !cartOpen && !picking && !checkoutOpen"
+      class="cartbar btn-primary"
+      @click="cartOpen = true"
+    >
       <span class="badge tabular">{{ cartCount }}</span>
       <span>查看購物車</span>
       <span class="tabular">{{ money(cartTotal) }}</span>
@@ -382,6 +549,7 @@ onUnmounted(unsubscribe)
 .switch {
   display: flex;
   gap: 6px;
+  align-items: center;
 }
 .switch button {
   background: rgba(255, 255, 255, 0.12);
@@ -393,6 +561,14 @@ onUnmounted(unsubscribe)
   border-color: var(--gold);
   color: var(--brand-dark);
   font-weight: 600;
+}
+.mine {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  text-decoration: none;
+  font-size: 15px;
 }
 .dot {
   display: inline-block;
@@ -408,6 +584,20 @@ onUnmounted(unsubscribe)
 .switch button.on .dot {
   background: var(--brand);
   color: #fff;
+}
+.notice {
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  text-align: center;
+  font-weight: 600;
+}
+.notice.soft {
+  background: var(--gold-soft);
+  color: var(--brand-dark);
+  font-weight: 500;
+  font-size: 14px;
 }
 .cats {
   display: flex;
@@ -687,10 +877,37 @@ onUnmounted(unsubscribe)
   font-size: 13px;
   color: var(--brand);
 }
-.note-field {
+.note-field,
+.field {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.field > span {
+  font-weight: 600;
+}
+.field b {
+  color: var(--brand);
+  margin-left: 2px;
+}
+.warn-text {
+  font-style: normal;
+  font-size: 13px;
+  color: #b3261e;
+}
+.recap {
+  border-top: 1px dashed var(--line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.recap-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 14px;
 }
 .line-top {
   display: flex;

@@ -2,10 +2,11 @@ import express from 'express';
 import multer from 'multer';
 import QRCode from 'qrcode';
 import os from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, now } from './db.js';
+import { db, getSettings, now, saveSettings } from './db.js';
 import { DATA_DIR, IMAGES_DIR } from './paths.js';
 import { seedMenu } from './seed.js';
 import { sseHandler, broadcast } from './events.js';
@@ -23,6 +24,14 @@ if (db.prepare('SELECT COUNT(*) AS n FROM menu_items').get().n === 0) {
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+
+/* ---------- 保溫用健康檢查 ---------- */
+// Render 免費方案 15 分鐘沒流量就休眠，之後第一位客人要等約 50 秒才看得到畫面。
+// 用外部排程（例如 cron-job.org）每 10 分鐘打這支，服務就不會睡著。
+// 刻意不碰資料庫也不查任何東西，讓它又快又不吃資源。
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, uptime: Math.round(process.uptime()) });
+});
 
 /* ---------- 工具 ---------- */
 // WSL / Hyper-V / VirtualBox 之類的虛擬網卡，手機連不到，要排除
@@ -55,6 +64,37 @@ function staffOnly(req, res, next) {
 
 const ok = (v) => v !== undefined && v !== null && String(v).trim() !== '';
 const bad = (res, msg) => res.status(400).json({ error: msg });
+
+/* ---------- 試用期 ---------- */
+// 要給店家試用 7 天，就在部署時設 TRIAL_UNTIL=2026-09-19（最後一天，含當天）。
+// 到期後客人端停止下單，但店員照樣能登入後台看資料、下載備份，不會把店家鎖在門外。
+// 不設這個變數就是完整版，沒有任何期限。
+const TRIAL_UNTIL = String(process.env.TRIAL_UNTIL || '').trim();
+
+function trialInfo() {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(TRIAL_UNTIL)) return null;
+  // 店家在台灣，用 +08:00 算到當天營業結束，避免伺服器在新加坡卻提早一天到期
+  const endsAt = new Date(`${TRIAL_UNTIL}T23:59:59+08:00`).getTime();
+  const msLeft = endsAt - Date.now();
+  return {
+    until: TRIAL_UNTIL,
+    daysLeft: Math.max(0, Math.ceil(msLeft / 86400000)),
+    expired: msLeft <= 0,
+  };
+}
+
+/* ---------- 外帶單編號 ---------- */
+/** 取餐號：每天從 001 重新開始，客人到店報這個號碼 */
+function nextPickupNo() {
+  const n = db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM orders WHERE type = 'takeout' AND date(created_at,'localtime') = date('now','localtime')"
+    )
+    .get().n;
+  return String(n + 1).padStart(3, '0');
+}
+/** 查詢碼：取餐號每天重複，不能拿來當查訂單的網址，另外給一組猜不到的碼 */
+const newTrackCode = () => randomBytes(5).toString('hex');
 
 function itemsOf(orderId) {
   return db
@@ -95,6 +135,21 @@ function openSession(tableId) {
 /* ---------- 客人端 ---------- */
 app.get('/api/events', sseHandler);
 
+// 店名、電話、外帶開不開、試用還剩幾天——前端每頁都要，公開不需登入
+app.get('/api/shop', (_req, res) => {
+  const s = getSettings();
+  res.json({
+    name: s.shop_name,
+    phone: s.shop_phone,
+    address: s.shop_address,
+    takeoutEnabled: s.takeout_enabled === '1',
+    takeoutLeadMinutes: Number(s.takeout_lead_minutes) || 20,
+    paymentOnline: s.payment_online === '1',
+    paymentProvider: s.payment_provider,
+    trial: trialInfo(),
+  });
+});
+
 app.get('/api/menu', (_req, res) => {
   const cats = db.prepare('SELECT * FROM categories ORDER BY sort, id').all();
   const stmt = db.prepare('SELECT * FROM menu_items WHERE category_id = ? ORDER BY sort, id');
@@ -127,11 +182,31 @@ app.get('/api/tables/:id/session', (req, res) => {
   res.json({ table, session, orders, total: orders.reduce((s, o) => s + o.total, 0) });
 });
 
-// 送出訂單
+// 送出訂單（內用掃桌號，外帶/遠端訂餐不需要桌號）
 app.post('/api/orders', (req, res) => {
-  const { tableId, items, note = '' } = req.body || {};
-  const table = db.prepare('SELECT * FROM tables WHERE id = ?').get(Number(tableId));
-  if (!table) return bad(res, '桌號不存在');
+  const { type = 'dine_in', tableId, items, note = '', customer = {}, pickupAt = '' } = req.body || {};
+  const takeout = type === 'takeout';
+
+  const trial = trialInfo();
+  if (trial?.expired) {
+    return res.status(403).json({ error: '試用期已結束，目前暫停接單。' });
+  }
+
+  let table = null;
+  if (takeout) {
+    if (getSettings().takeout_enabled !== '1') return bad(res, '本店目前暫停外帶接單，敬請見諒');
+    if (!ok(customer.name)) return bad(res, '請填寫取餐人姓名');
+    if (!/^[0-9+\-() ]{8,20}$/.test(String(customer.phone || '').trim())) {
+      return bad(res, '請填寫正確的連絡電話');
+    }
+    // 空字串代表「盡快取餐」，有填就必須是 HH:MM
+    if (pickupAt !== '' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(pickupAt))) {
+      return bad(res, '取餐時間格式不正確');
+    }
+  } else {
+    table = db.prepare('SELECT * FROM tables WHERE id = ?').get(Number(tableId));
+    if (!table) return bad(res, '桌號不存在');
+  }
   if (!Array.isArray(items) || items.length === 0) return bad(res, '購物車是空的');
 
   const lookup = db.prepare('SELECT * FROM menu_items WHERE id = ?');
@@ -173,10 +248,33 @@ app.post('/api/orders', (req, res) => {
     });
   }
 
-  const session = openSession(table.id);
-  const orderId = db
-    .prepare('INSERT INTO orders (session_id, table_id, status, note, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(session.id, table.id, 'pending', String(note), now()).lastInsertRowid;
+  let orderId;
+  if (takeout) {
+    // 開了「先確認再下廚」就停在 awaiting，店員按接單才會出現在廚房看板
+    const initial = getSettings().takeout_confirm_first === '1' ? 'awaiting' : 'pending';
+    orderId = db
+      .prepare(
+        `INSERT INTO orders (type, status, note, created_at, pickup_no, track_code, customer_name, customer_phone, pickup_at)
+         VALUES ('takeout', ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        initial,
+        String(note),
+        now(),
+        nextPickupNo(),
+        newTrackCode(),
+        String(customer.name).trim(),
+        String(customer.phone).trim(),
+        String(pickupAt)
+      ).lastInsertRowid;
+  } else {
+    const session = openSession(table.id);
+    orderId = db
+      .prepare(
+        "INSERT INTO orders (type, session_id, table_id, status, note, created_at) VALUES ('dine_in', ?, ?, 'pending', ?, ?)"
+      )
+      .run(session.id, table.id, String(note), now()).lastInsertRowid;
+  }
 
   const insItem = db.prepare(
     'INSERT INTO order_items (order_id, item_id, name, price, qty, note, options) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -188,8 +286,50 @@ app.post('/api/orders', (req, res) => {
   res.status(201).json(order);
 });
 
+/* ---------- 外帶 / 遠端訂餐 ---------- */
+// 客人用查詢碼追自己那張單的進度。取餐號每天重複，所以網址不能用取餐號。
+app.get('/api/takeout/:code', (req, res) => {
+  const order = db
+    .prepare("SELECT * FROM orders WHERE type = 'takeout' AND track_code = ?")
+    .get(String(req.params.code));
+  if (!order) return res.status(404).json({ error: '查無此訂單' });
+  res.json(withItems([order])[0]);
+});
+
+/**
+ * 外帶線上付款。
+ *
+ * 目前只有 mock（示範用）：按下去就當作付款成功，不會真的跟客人收錢，
+ * 用途是讓 demo 能把「線上付款 → 廚房 → 取餐」整條流程走完。
+ *
+ * 要真的收錢，在這裡接金流（綠界 ECPay / 藍新 / LINE Pay），流程會變成三步：
+ *   1. 這支改成向金流商建立交易，回傳付款網址，前端把客人導過去
+ *   2. 金流商付款完成後回呼一支新的 /api/payments/callback（要驗簽章）
+ *   3. 驗章通過才在這裡寫 paid_at
+ * 在那之前絕對不要因為前端說「付好了」就標記已付款——前端的話一律不能信。
+ */
+app.post('/api/takeout/:code/pay-online', (req, res) => {
+  const order = db
+    .prepare("SELECT * FROM orders WHERE type = 'takeout' AND track_code = ?")
+    .get(String(req.params.code));
+  if (!order) return res.status(404).json({ error: '查無此訂單' });
+  if (order.paid_at) return bad(res, '這張單已經付過款了');
+
+  const settings = getSettings();
+  if (settings.payment_online !== '1') return bad(res, '本店目前未開放線上付款');
+  if (settings.payment_provider !== 'mock') {
+    return res.status(501).json({ error: '線上金流尚未設定完成，請改選到店付款' });
+  }
+
+  db.prepare('UPDATE orders SET paid_at = ?, payment = ? WHERE id = ?').run(now(), 'online', order.id);
+  const updated = withItems([db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id)])[0];
+  broadcast('order:update', updated);
+  res.json(updated);
+});
+
 /* ---------- 廚房 ---------- */
-const STATUSES = ['pending', 'preparing', 'done', 'cancelled'];
+// awaiting 只有外帶會用到：店家開了「先確認再下廚」時，單子停在這一關等店員接單
+const STATUSES = ['awaiting', 'pending', 'preparing', 'done', 'cancelled'];
 
 app.get('/api/kitchen/orders', staffOnly, (req, res) => {
   const all = req.query.scope === 'all';
@@ -378,7 +518,13 @@ app.get('/api/admin/qrcodes', staffOnly, async (_req, res) => {
     const url = `${baseURL()}/t/${t.id}`;
     out.push({ ...t, url, qr: await QRCode.toDataURL(url, { width: 512, margin: 1 }) });
   }
-  res.json({ baseURL: baseURL(), tables: out });
+  // 外帶專用 QRcode：貼在店門口或傳給客人，掃了直接開外帶點餐頁
+  const takeoutUrl = `${baseURL()}/takeout`;
+  res.json({
+    baseURL: baseURL(),
+    tables: out,
+    takeout: { url: takeoutUrl, qr: await QRCode.toDataURL(takeoutUrl, { width: 512, margin: 1 }) },
+  });
 });
 
 /* ---------- 後台：帳單 / 結帳 ---------- */
@@ -393,6 +539,32 @@ app.get('/api/admin/bills', staffOnly, (_req, res) => {
       return { ...s, table, orders, total: orders.reduce((sum, o) => sum + o.total, 0) };
     })
   );
+});
+
+// 外帶單不掛在桌次底下，各自收款，所以獨立一張清單
+app.get('/api/admin/takeout', staffOnly, (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT * FROM orders
+       WHERE type = 'takeout' AND date(created_at,'localtime') = date('now','localtime')
+       ORDER BY id DESC`
+    )
+    .all();
+  res.json(withItems(rows));
+});
+
+app.post('/api/admin/orders/:id/pay', staffOnly, (req, res) => {
+  const order = db
+    .prepare("SELECT * FROM orders WHERE id = ? AND type = 'takeout'")
+    .get(Number(req.params.id));
+  if (!order) return res.status(404).json({ error: '外帶訂單不存在' });
+  if (order.paid_at) return bad(res, '這張單已經收過款了');
+
+  const payment = ['cash', 'card', 'mobile'].includes(req.body?.payment) ? req.body.payment : 'cash';
+  db.prepare('UPDATE orders SET paid_at = ?, payment = ? WHERE id = ?').run(now(), payment, order.id);
+  const updated = withItems([db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id)])[0];
+  broadcast('order:update', updated);
+  res.json(updated);
 });
 
 app.post('/api/admin/sessions/:id/close', staffOnly, (req, res) => {
@@ -432,11 +604,39 @@ app.get('/api/admin/report', staffOnly, (_req, res) => {
        GROUP BY oi.name ORDER BY qty DESC LIMIT 10`
     )
     .all();
+  // 外帶不走桌次帳單，營業額要另外加進來，否則老闆看到的數字是短少的
+  const takeoutPaid = db
+    .prepare(
+      `SELECT o.id, SUM(oi.price * oi.qty) AS total
+       FROM orders o JOIN order_items oi ON oi.order_id = o.id
+       WHERE o.type = 'takeout' AND o.paid_at IS NOT NULL
+         AND date(o.paid_at,'localtime') = date('now','localtime')
+       GROUP BY o.id`
+    )
+    .all();
+
   res.json({
     closedCount: closed.length,
-    revenue: closed.reduce((s, c) => s + (c.paid_total || 0), 0),
+    takeoutCount: takeoutPaid.length,
+    dineInRevenue: closed.reduce((s, c) => s + (c.paid_total || 0), 0),
+    takeoutRevenue: takeoutPaid.reduce((s, o) => s + (o.total || 0), 0),
+    revenue:
+      closed.reduce((s, c) => s + (c.paid_total || 0), 0) +
+      takeoutPaid.reduce((s, o) => s + (o.total || 0), 0),
     topItems: top,
   });
+});
+
+/* ---------- 後台：店家設定 ---------- */
+// /api/shop 只給客人端需要的欄位，後台要看到全部（含還沒公開的開關）
+app.get('/api/admin/settings', staffOnly, (_req, res) => {
+  res.json(getSettings());
+});
+
+app.patch('/api/admin/settings', staffOnly, (req, res) => {
+  const next = saveSettings(req.body);
+  broadcast('shop:update');
+  res.json(next);
 });
 
 /* ---------- 後台：下載備份 ---------- */
@@ -468,8 +668,18 @@ app.get(/^(?!\/api\/).*/, (_req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('\n  餐廳點餐系統已啟動');
+  const trial = trialInfo();
+  console.log(`\n  ${getSettings().shop_name} 點餐系統已啟動`);
   console.log(`  店內網址   ${baseURL()}`);
+  console.log(`  外帶訂餐   ${baseURL()}/takeout`);
   console.log(`  廚房看板   ${baseURL()}/kitchen`);
-  console.log(`  後台管理   ${baseURL()}/admin   （店員密碼 ${STAFF_PIN}）\n`);
+  console.log(`  後台管理   ${baseURL()}/admin   （店員密碼 ${STAFF_PIN}）`);
+  if (trial) {
+    console.log(
+      trial.expired
+        ? `  試用期     已於 ${trial.until} 結束，客人端停止接單`
+        : `  試用期     到 ${trial.until} 為止，還剩 ${trial.daysLeft} 天`
+    );
+  }
+  console.log('');
 });

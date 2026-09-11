@@ -74,6 +74,8 @@ let refreshTimer: number
 const unsubscribe = subscribe({
   'order:new': (o: Order) => {
     if (!ready.value) return
+    // 外帶開了「先確認再下廚」時會停在 awaiting，那種單還沒輪到廚房，不要跳出來也不要響
+    if (o.status !== 'pending') return
     // 可能已由重新整理帶進來，避免重複
     if (!orders.value.some((x) => x.id === o.id)) orders.value = [...orders.value, o]
     chime()
@@ -122,8 +124,16 @@ onUnmounted(() => {
           <p v-if="!pending.length" class="empty muted">目前沒有新訂單</p>
           <article v-for="o in pending" :key="o.id" class="card ticket" :class="{ late: waited(o.created_at).late }">
             <header>
-              <span class="table">{{ o.table_id }} 號桌</span>
-              <span class="time">{{ clockTime(o.created_at) }}・等候 {{ waited(o.created_at).mins }} 分</span>
+              <span class="table" :class="{ out: o.type === 'takeout' }">
+                <template v-if="o.type === 'takeout'">外帶 {{ o.pickup_no }}</template>
+                <template v-else>{{ o.table_id }} 號桌</template>
+              </span>
+              <span class="time">
+                <b v-if="o.type === 'takeout'" class="pickup">
+                  {{ o.pickup_at ? `${o.pickup_at} 取餐` : '盡快取餐' }}
+                </b>
+                {{ clockTime(o.created_at) }}・等候 {{ waited(o.created_at).mins }} 分
+              </span>
             </header>
             <ul>
               <li v-for="i in o.items" :key="i.id">
@@ -152,8 +162,16 @@ onUnmounted(() => {
             :class="{ late: waited(o.created_at).late }"
           >
             <header>
-              <span class="table">{{ o.table_id }} 號桌</span>
-              <span class="time">{{ clockTime(o.created_at) }}・等候 {{ waited(o.created_at).mins }} 分</span>
+              <span class="table" :class="{ out: o.type === 'takeout' }">
+                <template v-if="o.type === 'takeout'">外帶 {{ o.pickup_no }}</template>
+                <template v-else>{{ o.table_id }} 號桌</template>
+              </span>
+              <span class="time">
+                <b v-if="o.type === 'takeout'" class="pickup">
+                  {{ o.pickup_at ? `${o.pickup_at} 取餐` : '盡快取餐' }}
+                </b>
+                {{ clockTime(o.created_at) }}・等候 {{ waited(o.created_at).mins }} 分
+              </span>
             </header>
             <ul>
               <li v-for="i in o.items" :key="i.id">
@@ -253,9 +271,19 @@ onUnmounted(() => {
   font-size: 26px;
   font-weight: 800;
 }
+/* 外帶單要一眼認出來：做法一樣，但不能端到桌上 */
+.table.out {
+  color: var(--brand);
+}
 .time {
   color: var(--muted);
   font-size: 14px;
+  text-align: right;
+}
+.pickup {
+  display: block;
+  color: var(--brand-dark);
+  font-size: 15px;
 }
 .ticket ul {
   list-style: none;

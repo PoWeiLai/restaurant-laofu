@@ -4,27 +4,32 @@ import StaffGate from '../components/StaffGate.vue'
 import {
   api,
   clearPin,
+  clockTime,
   downloadBackup,
   money,
   subscribe,
   type Bill,
   type Category,
   type MenuItem,
+  type Order,
   type OrderItem,
   type QrTable,
+  type Settings,
 } from '../api'
 
 /** 帳單一行：品名（選項）×數量 */
 const describeLine = (i: OrderItem) =>
   `${i.name}${i.options.length ? `（${i.options.map((o) => o.name).join('／')}）` : ''}×${i.qty}`
 
-type Tab = 'menu' | 'qrcode' | 'bills' | 'report'
+type Tab = 'menu' | 'qrcode' | 'bills' | 'takeout' | 'report' | 'settings'
 const tab = ref<Tab>('menu')
 const TABS: { id: Tab; label: string }[] = [
   { id: 'menu', label: '菜單管理' },
   { id: 'qrcode', label: 'QRcode 列印' },
-  { id: 'bills', label: '帳單結帳' },
+  { id: 'bills', label: '內用帳單' },
+  { id: 'takeout', label: '外帶訂單' },
   { id: 'report', label: '今日報表' },
+  { id: 'settings', label: '店家設定' },
 ]
 
 const toast = ref('')
@@ -136,7 +141,7 @@ const importBulk = () =>
   })
 
 /* ---------- QRcode ---------- */
-const qr = ref<{ baseURL: string; tables: QrTable[] } | null>(null)
+const qr = ref<{ baseURL: string; tables: QrTable[]; takeout: { url: string; qr: string } } | null>(null)
 const loadQr = async () => (qr.value = await api.qrcodes())
 
 /* ---------- 帳單 ---------- */
@@ -159,8 +164,57 @@ const printBill = (bill: Bill) => {
 const printTarget = ref<Bill | null>(null)
 const printAll = () => window.print()
 
+/* ---------- 外帶訂單 ---------- */
+// 外帶不掛在桌次底下，每張單自己收款，所以跟內用帳單分開管
+const takeoutOrders = ref<Order[]>([])
+const loadTakeout = async () => (takeoutOrders.value = await api.takeoutOrders())
+
+const TAKEOUT_STATUS: Record<string, string> = {
+  awaiting: '待接單',
+  pending: '待製作',
+  preparing: '製作中',
+  done: '已完成',
+  cancelled: '已取消',
+}
+
+/** 店家開了「先確認再下廚」時，按這裡才把單子送進廚房 */
+const acceptTakeout = (o: Order) =>
+  run(async () => {
+    await api.setOrderStatus(o.id, 'pending')
+    await loadTakeout()
+  }, `外帶 ${o.pickup_no} 已接單，已送進廚房`)
+
+const rejectTakeout = (o: Order) => {
+  if (!confirm(`確定要取消外帶 ${o.pickup_no}（${o.customer_name}）？建議先打電話告知客人。`)) return
+  run(async () => {
+    await api.setOrderStatus(o.id, 'cancelled')
+    await loadTakeout()
+  }, '已取消這張外帶單')
+}
+
+const payTakeout = (o: Order, payment: string) =>
+  run(async () => {
+    await api.payTakeout(o.id, payment)
+    await Promise.all([loadTakeout(), loadReport()])
+  }, `外帶 ${o.pickup_no} 已收款`)
+
+/* ---------- 店家設定 ---------- */
+const settings = ref<Settings | null>(null)
+const settingsBusy = ref(false)
+const loadSettings = async () => (settings.value = await api.settings())
+
+async function saveSettings() {
+  if (!settings.value) return
+  if (!settings.value.shop_name.trim()) return say('店名不能空白')
+  settingsBusy.value = true
+  await run(async () => {
+    settings.value = await api.saveSettings(settings.value!)
+  }, '設定已儲存，客人端會立刻更新')
+  settingsBusy.value = false
+}
+
 /* ---------- 報表 ---------- */
-const report = ref<{ closedCount: number; revenue: number; topItems: { name: string; qty: number; amount: number }[] } | null>(null)
+const report = ref<Awaited<ReturnType<typeof api.report>> | null>(null)
 const loadReport = async () => (report.value = await api.report())
 
 const backupBusy = ref(false)
@@ -176,7 +230,9 @@ function openTab(next: Tab) {
   tab.value = next
   if (next === 'qrcode' && !qr.value) run(loadQr)
   if (next === 'bills') run(loadBills)
+  if (next === 'takeout') run(loadTakeout)
   if (next === 'report') run(loadReport)
+  if (next === 'settings') run(loadSettings)
 }
 
 function logout() {
@@ -192,9 +248,16 @@ function start() {
 }
 
 const unsubscribe = subscribe({
-  'order:new': () => ready.value && tab.value === 'bills' && loadBills(),
-  'order:update': () => ready.value && tab.value === 'bills' && loadBills(),
+  'order:new': () => refreshCurrentTab(),
+  'order:update': () => refreshCurrentTab(),
 })
+
+/** 新單進來時只重抓當下這一頁，外帶單才會即時跳出來讓櫃檯看到 */
+function refreshCurrentTab() {
+  if (!ready.value) return
+  if (tab.value === 'bills') loadBills()
+  if (tab.value === 'takeout') loadTakeout()
+}
 onUnmounted(unsubscribe)
 </script>
 
@@ -308,6 +371,14 @@ onUnmounted(unsubscribe)
           <button class="btn-primary" @click="printAll">列印全部 QRcode</button>
         </div>
         <div class="qr-grid">
+          <!-- 外帶 QRcode 貼店門口或放名片、傳給熟客，掃了直接開外帶點餐頁 -->
+          <figure v-if="qr?.takeout" class="card qr-card out">
+            <img :src="qr.takeout.qr" alt="外帶訂餐 QRcode" />
+            <figcaption>
+              <strong>外帶訂餐</strong>
+              <span class="muted small">貼店門口 / 傳給客人</span>
+            </figcaption>
+          </figure>
           <figure v-for="t in qr?.tables || []" :key="t.id" class="card qr-card">
             <img :src="t.qr" :alt="`${t.name} QRcode`" />
             <figcaption>
@@ -342,6 +413,51 @@ onUnmounted(unsubscribe)
         </section>
       </main>
 
+      <!-- 外帶訂單 -->
+      <main v-show="tab === 'takeout'" class="wrap no-print">
+        <p v-if="!takeoutOrders.length" class="card pad muted center">今天還沒有外帶訂單</p>
+        <section v-for="o in takeoutOrders" :key="o.id" class="card pad takeout" :class="o.status">
+          <header class="cat-head">
+            <h2>
+              <span class="pickno tabular">{{ o.pickup_no }}</span>
+              {{ o.customer_name }}
+              <a :href="`tel:${o.customer_phone}`" class="phone">{{ o.customer_phone }}</a>
+            </h2>
+            <div class="badges">
+              <span class="pill" :class="o.status === 'done' ? 'on' : 'off'">{{ TAKEOUT_STATUS[o.status] }}</span>
+              <span class="pill" :class="o.paid_at ? 'on' : 'off'">
+                {{ o.paid_at ? (o.payment === 'online' ? '已線上付款' : '已收款') : '未收款' }}
+              </span>
+              <strong class="total tabular">{{ money(o.total) }}</strong>
+            </div>
+          </header>
+
+          <p class="muted when">
+            取餐時間 {{ o.pickup_at || '盡快' }}　·　下單 {{ clockTime(o.created_at) }}
+          </p>
+
+          <ul class="lines">
+            <li v-for="i in o.items" :key="i.id">
+              <span class="muted">×{{ i.qty }}</span>
+              <span>{{ describeLine(i) }}</span>
+              <span class="tabular">{{ money(i.price * i.qty) }}</span>
+            </li>
+          </ul>
+
+          <div class="row">
+            <template v-if="o.status === 'awaiting'">
+              <button class="btn-primary" @click="acceptTakeout(o)">接單，送進廚房</button>
+              <button class="btn-danger" @click="rejectTakeout(o)">取消訂單</button>
+            </template>
+            <template v-if="!o.paid_at && o.status !== 'cancelled'">
+              <button class="btn-ok" @click="payTakeout(o, 'cash')">現金收款</button>
+              <button class="btn-ok" @click="payTakeout(o, 'card')">刷卡收款</button>
+              <button class="btn-ok" @click="payTakeout(o, 'mobile')">行動支付</button>
+            </template>
+          </div>
+        </section>
+      </main>
+
       <!-- 報表 -->
       <main v-show="tab === 'report'" class="wrap no-print">
         <div class="stats">
@@ -350,8 +466,12 @@ onUnmounted(unsubscribe)
             <strong class="tabular">{{ money(report?.revenue || 0) }}</strong>
           </div>
           <div class="card pad stat">
-            <span class="muted">今日結帳桌數</span>
-            <strong class="tabular">{{ report?.closedCount || 0 }}</strong>
+            <span class="muted">內用（{{ report?.closedCount || 0 }} 桌）</span>
+            <strong class="tabular">{{ money(report?.dineInRevenue || 0) }}</strong>
+          </div>
+          <div class="card pad stat">
+            <span class="muted">外帶（{{ report?.takeoutCount || 0 }} 單）</span>
+            <strong class="tabular">{{ money(report?.takeoutRevenue || 0) }}</strong>
           </div>
         </div>
         <section class="card pad backup">
@@ -383,6 +503,49 @@ onUnmounted(unsubscribe)
               </tr>
             </tbody>
           </table>
+        </section>
+      </main>
+
+      <!-- 店家設定 -->
+      <main v-show="tab === 'settings'" class="wrap no-print">
+        <section v-if="settings" class="card pad settings">
+          <h2>店家資料</h2>
+          <p class="muted">
+            這些會顯示在客人的點餐頁與訂單上。改完按儲存，客人端立刻更新，不需要重新部署。
+          </p>
+          <label class="field"><span>店名</span><input v-model="settings.shop_name" /></label>
+          <label class="field"><span>電話</span><input v-model="settings.shop_phone" /></label>
+          <label class="field"><span>地址</span><input v-model="settings.shop_address" /></label>
+
+          <h2>外帶 / 遠端訂餐</h2>
+          <label class="check">
+            <input type="checkbox" true-value="1" false-value="0" v-model="settings.takeout_enabled" />
+            <span>開放外帶線上訂餐（忙不過來時可以先關掉，客人就看不到下單按鈕）</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" true-value="1" false-value="0" v-model="settings.takeout_confirm_first" />
+            <span>外帶單先由店員確認再進廚房（怕客人放鴿子時建議打開）</span>
+          </label>
+          <label class="field">
+            <span>備餐時間（分鐘）</span>
+            <input v-model="settings.takeout_lead_minutes" type="number" min="0" max="180" class="w-price" />
+          </label>
+
+          <h2>付款</h2>
+          <label class="check">
+            <input type="checkbox" true-value="1" false-value="0" v-model="settings.payment_online" />
+            <span>外帶開放線上先付款</span>
+          </label>
+          <p v-if="settings.payment_online === '1' && settings.payment_provider === 'mock'" class="warn-box">
+            目前是<strong>示範用的模擬付款</strong>：客人按下去就顯示已付款，但不會真的收到錢。
+            要真的收款需要串接金流（綠界／藍新／LINE Pay）並填入商店代號。
+          </p>
+
+          <div class="row">
+            <button class="btn-primary" :disabled="settingsBusy" @click="saveSettings">
+              {{ settingsBusy ? '儲存中…' : '儲存設定' }}
+            </button>
+          </div>
         </section>
       </main>
 
@@ -601,6 +764,82 @@ code {
   grid-template-columns: 80px 1fr auto;
   gap: 12px;
 }
+/* 外帶訂單 */
+.takeout .total {
+  font-size: 22px;
+  color: var(--brand);
+}
+/* 還沒接的單要跳出來，櫃檯不能漏看 */
+.takeout.awaiting {
+  border-left: 6px solid var(--warn);
+}
+.takeout.cancelled {
+  opacity: 0.6;
+}
+.pickno {
+  display: inline-block;
+  min-width: 58px;
+  margin-right: 8px;
+  padding: 2px 10px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  text-align: center;
+}
+.phone {
+  margin-left: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--brand-dark);
+}
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.when {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+/* 店家設定 */
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 620px;
+}
+.settings h2 {
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 17px;
+}
+.settings h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.settings p {
+  margin: 0;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field > span {
+  font-weight: 600;
+}
+.warn-box {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 14px;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

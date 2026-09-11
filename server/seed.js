@@ -4,12 +4,19 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { db } from './db.js';
+import { db, saveSettings } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function seedMenu() {
   const seed = JSON.parse(readFileSync(join(__dirname, 'menu.seed.json'), 'utf8'));
+
+  // 種子檔裡的店名/電話/地址一起帶進設定，店家之後可在後台「店家設定」自行修改
+  saveSettings({
+    shop_name: seed['店名'],
+    shop_phone: seed['電話'],
+    shop_address: seed['地址'],
+  });
 
   db.exec('DELETE FROM item_option_groups');
   db.exec('DELETE FROM option_choices');

@@ -10,6 +10,7 @@ const checking = ref(true)
 const pin = ref('')
 const error = ref('')
 const busy = ref(false)
+const showPin = ref(false)
 
 function unlock() {
   unlocked.value = true
@@ -56,7 +57,18 @@ async function login() {
     <form v-else class="card box" @submit.prevent="login">
       <h1>店員登入</h1>
       <p class="muted">此頁面提供廚房與後台使用，請輸入店員密碼。</p>
-      <input v-model="pin" type="password" inputmode="numeric" placeholder="店員密碼" autofocus />
+      <!-- 不要設 inputmode="numeric"：手機會只跳數字鍵盤，英數混合的密碼就打不出來 -->
+      <input
+        v-model="pin"
+        :type="showPin ? 'text' : 'password'"
+        placeholder="店員密碼"
+        autocomplete="current-password"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        autofocus
+      />
+      <label class="show"><input v-model="showPin" type="checkbox" />顯示密碼</label>
       <p v-if="error" class="err">{{ error }}</p>
       <button class="btn-primary" type="submit" :disabled="busy || !pin">
         {{ busy ? '驗證中…' : '登入' }}
@@ -78,6 +90,19 @@ async function login() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* 手機上店員常常戴手套/趕時間，給個顯示密碼可以自己核對打對沒 */
+.show {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.show input {
+  width: 16px;
+  height: 16px;
 }
 .err {
   margin: 0;

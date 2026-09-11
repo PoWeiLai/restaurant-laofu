@@ -1,14 +1,39 @@
 # Render 部署設定。到 Render 按 New → Blueprint → 選這個 repo，會自動照這份建立服務。
 services:
   - type: web
-    name: laofu-order
+    name: haowei-order
     runtime: node
     plan: free          # 免費方案：15 分鐘沒流量會休眠，喚醒約 1 分鐘，且沒有永久硬碟
     region: singapore   # Render 沒有台灣機房，新加坡離台灣最近
     buildCommand: npm ci && npm run build
     startCommand: npm start
+
+    # 休眠喚醒太慢的解法，兩段式：
+    # 1) 免費階段：到 cron-job.org 建一個排程，每 10 分鐘 GET https://你的服務.onrender.com/api/health
+    #    服務就不會睡著，客人掃碼是秒開的。設定步驟見 README「伺服器休眠怎麼解」。
+    # 2) 要正式給店家用：把上面 plan 改成 starter（約 US$7/月），不會休眠，
+    #    並把下面 disk 整段的註解拿掉——免費方案沒有永久硬碟，服務一重啟訂單資料會全部消失。
+    # disk:
+    #   name: data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+
     envVars:
       - key: STAFF_PIN
         sync: false     # 不寫在檔案裡：建立 Blueprint 時 Render 會問你要設什麼密碼
+
+      # 給店家試用 N 天就填最後一天（含當天），例如 2026-09-19。
+      # 到期後客人端停止下單，店員仍可登入後台看資料、下載備份。
+      # 要開通正式版：把這個變數的值清空或整個刪掉，服務重啟後就是完整版。
+      - key: TRIAL_UNTIL
+        sync: false
+
+      # 掛了永久硬碟之後才需要這兩個：把資料庫與店家上傳的照片指到硬碟上。
+      # 沒有硬碟就別設，設了反而讓資料寫進會被清掉的暫存區。
+      # - key: DATA_DIR
+      #   value: /var/data
+      # - key: IMAGES_DIR
+      #   value: /var/data/images
+
       # PUBLIC_URL 不用設：程式會自動讀 Render 給的 RENDER_EXTERNAL_URL，
       # QRcode 就會指向正確的線上網址。

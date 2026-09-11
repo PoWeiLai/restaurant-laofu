@@ -1,3 +1,5 @@
+import { ref } from 'vue'
+
 export interface OptionChoice {
   id: number
   group_id: number
@@ -46,16 +48,43 @@ export interface OrderItem {
   note: string
   options: ChosenOption[]
 }
-export type OrderStatus = 'pending' | 'preparing' | 'done' | 'cancelled'
+/** awaiting 只有外帶會用到：店家開了「先確認再下廚」時，單子停在這一關等店員接單 */
+export type OrderStatus = 'awaiting' | 'pending' | 'preparing' | 'done' | 'cancelled'
+export type OrderType = 'dine_in' | 'takeout'
 export interface Order {
   id: number
-  session_id: number
-  table_id: number
+  type: OrderType
+  /** 外帶單沒有桌次與桌號，兩個都是 null */
+  session_id: number | null
+  table_id: number | null
   status: OrderStatus
   note: string
   created_at: string
   items: OrderItem[]
   total: number
+  /* 以下只有外帶單有值 */
+  pickup_no: string
+  track_code: string
+  customer_name: string
+  customer_phone: string
+  /** 預約取餐時間 HH:MM，空字串代表盡快 */
+  pickup_at: string
+  paid_at: string | null
+  payment: string | null
+}
+
+export interface Shop {
+  name: string
+  phone: string
+  address: string
+  takeoutEnabled: boolean
+  takeoutLeadMinutes: number
+  /** 外帶是否開放線上先付款 */
+  paymentOnline: boolean
+  /** mock = 示範用模擬付款，不會真的收錢 */
+  paymentProvider: string
+  /** 沒設試用期就是 null（完整版） */
+  trial: { until: string; daysLeft: number; expired: boolean } | null
 }
 export interface Table {
   id: number
@@ -75,11 +104,41 @@ export interface QrTable extends Table {
   url: string
   qr: string
 }
+export interface Settings {
+  shop_name: string
+  shop_phone: string
+  shop_address: string
+  takeout_enabled: string
+  takeout_lead_minutes: string
+  takeout_confirm_first: string
+  payment_online: string
+  payment_provider: string
+}
 
 const PIN_KEY = 'restaurant.staffPin'
 export const getPin = () => localStorage.getItem(PIN_KEY) || ''
 export const setPin = (pin: string) => localStorage.setItem(PIN_KEY, pin)
 export const clearPin = () => localStorage.removeItem(PIN_KEY)
+
+/**
+ * 伺服器休眠喚醒中。
+ * Render 免費方案沒流量會休眠，第一個請求要等數十秒；超過 2.5 秒還沒回來就打開等待畫面，
+ * 讓客人知道是在喚醒而不是當掉。
+ */
+export const waking = ref(false)
+let inflight = 0
+let wakeTimer: ReturnType<typeof setTimeout> | undefined
+
+function beginRequest() {
+  inflight++
+  if (wakeTimer === undefined) wakeTimer = setTimeout(() => (waking.value = true), 2500)
+}
+function endRequest() {
+  if (--inflight > 0) return
+  clearTimeout(wakeTimer)
+  wakeTimer = undefined
+  waking.value = false
+}
 
 export class ApiError extends Error {
   status: number
@@ -102,24 +161,43 @@ async function request<T>(path: string, options: { method?: string; body?: unkno
     body = JSON.stringify(options.body)
   }
 
-  const res = await fetch(`/api${path}`, { method: options.method || 'GET', headers, body })
-  const text = await res.text()
-  const data = text ? JSON.parse(text) : null
-  if (!res.ok) throw new ApiError(res.status, data?.error || `連線失敗（${res.status}）`)
-  return data as T
+  beginRequest()
+  try {
+    const res = await fetch(`/api${path}`, { method: options.method || 'GET', headers, body })
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : null
+    if (!res.ok) throw new ApiError(res.status, data?.error || `連線失敗（${res.status}）`)
+    return data as T
+  } finally {
+    endRequest()
+  }
+}
+
+export interface CartPayload {
+  itemId: number
+  qty: number
+  note?: string
+  choiceIds?: number[]
 }
 
 export const api = {
+  shop: () => request<Shop>('/shop'),
   menu: () => request<Category[]>('/menu'),
   tables: () => request<Table[]>('/tables'),
   tableSession: (id: number) =>
     request<{ table: Table; session: unknown; orders: Order[]; total: number }>(`/tables/${id}/session`),
-  placeOrder: (
-    tableId: number,
-    items: { itemId: number; qty: number; note?: string; choiceIds?: number[] }[],
+  placeOrder: (tableId: number, items: CartPayload[], note = '') =>
+    request<Order>('/orders', { method: 'POST', body: { type: 'dine_in', tableId, items, note } }),
+
+  /** 外帶／遠端訂餐：不需要桌號，改留取餐人與電話 */
+  placeTakeout: (
+    customer: { name: string; phone: string },
+    items: CartPayload[],
+    pickupAt = '',
     note = ''
-  ) =>
-    request<Order>('/orders', { method: 'POST', body: { tableId, items, note } }),
+  ) => request<Order>('/orders', { method: 'POST', body: { type: 'takeout', customer, items, pickupAt, note } }),
+  takeoutOrder: (code: string) => request<Order>(`/takeout/${code}`),
+  payTakeoutOnline: (code: string) => request<Order>(`/takeout/${code}/pay-online`, { method: 'POST' }),
 
   login: (pin: string) => request<{ ok: true }>('/staff/login', { method: 'POST', body: { pin } }),
 
@@ -145,14 +223,29 @@ export const api = {
     return request<{ url: string }>('/admin/upload', { method: 'POST', body: fd })
   },
 
-  qrcodes: () => request<{ baseURL: string; tables: QrTable[] }>('/admin/qrcodes'),
+  qrcodes: () =>
+    request<{ baseURL: string; tables: QrTable[]; takeout: { url: string; qr: string } }>('/admin/qrcodes'),
   bills: () => request<Bill[]>('/admin/bills'),
   closeBill: (sessionId: number, payment: string) =>
     request<{ ok: true; total: number }>(`/admin/sessions/${sessionId}/close`, { method: 'POST', body: { payment } }),
+
+  takeoutOrders: () => request<Order[]>('/admin/takeout'),
+  payTakeout: (orderId: number, payment: string) =>
+    request<Order>(`/admin/orders/${orderId}/pay`, { method: 'POST', body: { payment } }),
+
+  settings: () => request<Settings>('/admin/settings'),
+  saveSettings: (patch: Partial<Settings>) =>
+    request<Settings>('/admin/settings', { method: 'PATCH', body: patch }),
+
   report: () =>
-    request<{ closedCount: number; revenue: number; topItems: { name: string; qty: number; amount: number }[] }>(
-      '/admin/report'
-    ),
+    request<{
+      closedCount: number
+      takeoutCount: number
+      dineInRevenue: number
+      takeoutRevenue: number
+      revenue: number
+      topItems: { name: string; qty: number; amount: number }[]
+    }>('/admin/report'),
 }
 
 /** 下載整份營運資料備份，交給店家自己保存 */

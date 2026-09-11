@@ -29,3 +29,6 @@ data/
 *.db
 *.db-wal
 *.db-shm
+
+# 店內菜單看板實拍照：只留在本機當參考，不進 repo（避免 demo 時被認出是哪家店）
+menu-source/

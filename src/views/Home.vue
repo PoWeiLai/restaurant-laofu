@@ -1,29 +1,44 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api, type Table } from '../api'
+import { api, type Shop, type Table } from '../api'
 
 const tables = ref<Table[]>([])
+const shop = ref<Shop | null>(null)
 onMounted(async () => {
-  tables.value = await api.tables()
+  // 店名等資料都在後台「店家設定」裡，這裡不寫死
+  ;[shop.value, tables.value] = await Promise.all([api.shop(), api.tables()])
 })
 </script>
 
 <template>
   <div class="home">
     <div class="sign">
-      <h1>老福家常牛肉麵</h1>
-      <p>02-8966-0223　土城區廣明街63巷28號</p>
+      <h1>{{ shop?.name || '線上點餐' }}</h1>
+      <p>{{ shop?.phone }}　{{ shop?.address }}</p>
     </div>
+
+    <p v-if="shop?.trial" class="trial" :class="{ over: shop.trial.expired }">
+      {{
+        shop.trial.expired
+          ? `試用期已於 ${shop.trial.until} 結束，客人端已停止接單`
+          : `試用期至 ${shop.trial.until}，還剩 ${shop.trial.daysLeft} 天`
+      }}
+    </p>
+
     <p class="muted">客人掃桌上的 QRcode 即可點餐，訂單直接進廚房看板。</p>
 
     <div class="cards">
+      <RouterLink to="/takeout" class="card tile out">
+        <h2>外帶線上訂餐</h2>
+        <p class="muted">客人在家先點好、時間到再來拿，不用現場排隊</p>
+      </RouterLink>
       <RouterLink to="/kitchen" class="card tile">
         <h2>廚房看板</h2>
         <p class="muted">即時收單、標記製作中與完成出餐</p>
       </RouterLink>
       <RouterLink to="/admin" class="card tile">
         <h2>後台管理</h2>
-        <p class="muted">改菜單、列印 QRcode、結帳與今日報表</p>
+        <p class="muted">改菜單、列印 QRcode、結帳與店家設定</p>
       </RouterLink>
     </div>
 
@@ -62,11 +77,29 @@ onMounted(async () => {
   color: rgba(255, 255, 255, 0.82);
   font-size: 14px;
 }
+.trial {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--gold-soft);
+  color: var(--brand-dark);
+  text-align: center;
+  font-weight: 600;
+}
+.trial.over {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
   margin: 24px 0 40px;
+}
+/* 外帶是給客人用的入口，跟店員用的兩張分開視覺 */
+.tile.out {
+  border: 2px solid var(--brand);
+  background: var(--brand-soft);
 }
 .tile {
   padding: 20px;

@@ -1,5 +1,5 @@
 {
-  "_說明": "好味牛肉麵 菜單資料（依店內看板 2026）。改完執行 npm run seed:menu 匯入（會覆蓋現有菜單）。price 為整數（新台幣）。",
+  "_說明": "示範用的虛構菜單（非任何真實店家）。改完執行 npm run seed:menu 匯入（會覆蓋現有菜單）。price 為整數（新台幣）。",
   "店名": "好味牛肉麵",
   "電話": "02-1234-5678",
   "地址": "新北市示範區美食路88號",
@@ -20,9 +20,9 @@
       "mode": "single",
       "required": true,
       "choices": [
-        { "name": "細圓麵", "price_delta": 0 },
-        { "name": "刀削麵", "price_delta": 0 },
-        { "name": "拉麵", "price_delta": 0 }
+        { "name": "細麵", "price_delta": 0 },
+        { "name": "寬麵", "price_delta": 0 },
+        { "name": "刀削麵", "price_delta": 0 }
       ]
     },
     {
@@ -32,11 +32,11 @@
       "required": true,
       "choices": [
         { "name": "小碗", "price_delta": 0 },
-        { "name": "大碗", "price_delta": 60 }
+        { "name": "大碗", "price_delta": 50 }
       ]
     },
     {
-      "key": "份量湯麵",
+      "key": "份量湯",
       "name": "份量",
       "mode": "single",
       "required": true,
@@ -52,12 +52,12 @@
       "required": true,
       "choices": [
         { "name": "牛腱", "price_delta": 0 },
-        { "name": "肋條", "price_delta": 0 },
+        { "name": "牛肋條", "price_delta": 0 },
         { "name": "綜合", "price_delta": 0 }
       ]
     },
     {
-      "key": "老饕部位",
+      "key": "特選部位",
       "name": "選部位",
       "mode": "single",
       "required": true,
@@ -73,108 +73,122 @@
       "required": false,
       "choices": [
         { "name": "加麵", "price_delta": 20 },
-        { "name": "加肉", "price_delta": 50 }
+        { "name": "加肉", "price_delta": 50 },
+        { "name": "加滷蛋", "price_delta": 15 }
       ]
     },
     {
-      "key": "小碟涼菜",
-      "name": "附贈小碟涼菜（免費擇一，每日隨機供應）",
+      "key": "附餐小菜",
+      "name": "附贈小菜（免費擇一）",
       "mode": "single",
       "required": true,
       "choices": [
-        { "name": "紅油劍筍", "price_delta": 0 },
-        { "name": "涼拌雪菜", "price_delta": 0 },
-        { "name": "和風翡翠", "price_delta": 0 },
-        { "name": "涼拌海帶絲", "price_delta": 0 },
+        { "name": "涼拌小黃瓜", "price_delta": 0 },
+        { "name": "黃金泡菜", "price_delta": 0 },
+        { "name": "涼拌木耳", "price_delta": 0 },
         { "name": "不需要", "price_delta": 0 }
       ]
     }
   ],
   "categories": [
     {
-      "name": "牛肉麵系列",
+      "name": "牛肉麵",
       "items": [
         {
-          "name": "原汁牛肉湯麵",
-          "price": 95,
-          "description": "清燉原汁牛肉湯頭　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["湯乾", "麵種", "份量湯麵", "加點", "小碟涼菜"],
+          "name": "清燉牛肉湯麵",
+          "price": 90,
+          "description": "清燉原汁湯頭　附贈小菜一份",
+          "options": ["湯乾", "麵種", "份量湯", "加點", "附餐小菜"],
           "image": "/images/beef-soup-noodle.jpg"
         },
         {
-          "name": "炙燒雪花牛肉麵",
-          "price": 135,
-          "description": "炙燒雪花牛肉片　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["湯乾", "麵種", "份量", "加點", "小碟涼菜"],
+          "name": "香煎牛肉片麵",
+          "price": 130,
+          "description": "現煎牛肉片　附贈小菜一份",
+          "options": ["湯乾", "麵種", "份量", "加點", "附餐小菜"],
           "image": "/images/snowflake-beef-noodle.jpg"
         },
         {
-          "name": "好味家常牛肉麵",
-          "price": 160,
-          "description": "牛腱／肋條／綜合任選　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["家常部位", "湯乾", "麵種", "份量", "加點", "小碟涼菜"],
+          "name": "招牌家常牛肉麵",
+          "price": 150,
+          "description": "牛腱／牛肋條／綜合任選　附贈小菜一份",
+          "options": ["家常部位", "湯乾", "麵種", "份量", "加點", "附餐小菜"],
           "image": "/images/house-beef-mixed.jpg"
         },
         {
-          "name": "精選老饕牛肉麵",
-          "price": 190,
-          "description": "牛三寶／牛肋排任選　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["老饕部位", "湯乾", "麵種", "份量", "加點", "小碟涼菜"],
+          "name": "清燉牛腱麵",
+          "price": 150,
+          "description": "整塊牛腱慢燉入味　附贈小菜一份",
+          "options": ["湯乾", "麵種", "份量", "加點", "附餐小菜"],
+          "image": "/images/house-beef-shank.jpg"
+        },
+        {
+          "name": "紅燒牛肋麵",
+          "price": 160,
+          "description": "紅燒牛肋條　附贈小菜一份",
+          "options": ["湯乾", "麵種", "份量", "加點", "附餐小菜"],
+          "image": "/images/house-beef-rib.jpg"
+        },
+        {
+          "name": "特選牛三寶麵",
+          "price": 185,
+          "description": "牛三寶／牛肋排任選　附贈小菜一份",
+          "options": ["特選部位", "湯乾", "麵種", "份量", "加點", "附餐小菜"],
           "image": "/images/gourmet-three-treasure.jpg"
         },
         {
-          "name": "牛霸王",
-          "price": 350,
-          "description": "牛腱、牛肋、牛肚、牛筋、牛小排一次到齊　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["湯乾", "麵種", "加點", "小碟涼菜"],
+          "name": "滿漢大碗牛肉麵",
+          "price": 320,
+          "description": "牛腱、牛肋、牛肚、牛筋、牛小排一次到齊　附贈小菜一份",
+          "options": ["湯乾", "麵種", "加點", "附餐小菜"],
           "image": "/images/gourmet-short-rib.jpg"
         }
       ]
     },
     {
-      "name": "雞湯拉麵系列",
+      "name": "雞湯麵",
       "items": [
         {
-          "name": "角丁叉燒雞湯拉麵",
-          "price": 150,
-          "description": "白湯雞高湯配角丁叉燒　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["份量", "加點", "小碟涼菜"],
+          "name": "叉燒雞湯麵",
+          "price": 145,
+          "description": "雞白湯配叉燒　附贈小菜一份",
+          "options": ["麵種", "份量湯", "加點", "附餐小菜"],
           "image": "/images/chashu-chicken-ramen.jpg"
         },
         {
-          "name": "舒肥雞雞湯拉麵",
-          "price": 170,
-          "description": "低溫舒肥雞胸　附贈小碟涼菜一份＋內用飲品無限暢飲",
-          "options": ["份量", "加點", "小碟涼菜"],
+          "name": "嫩雞胸雞湯麵",
+          "price": 165,
+          "description": "低溫慢煮雞胸　附贈小菜一份",
+          "options": ["麵種", "份量湯", "加點", "附餐小菜"],
           "image": "/images/sousvide-chicken-ramen.jpg"
         }
       ]
     },
     {
-      "name": "秘製滷味",
+      "name": "滷味",
       "items": [
-        { "name": "豆干", "price": 35, "image": "/images/dried-tofu.jpg" },
-        { "name": "百頁豆腐", "price": 35, "image": "/images/hyakuyo-tofu.jpg" },
-        { "name": "滷牛筋", "price": 60, "image": "/images/braised-beef-tendon.jpg" },
-        { "name": "滷牛肚", "price": 60, "image": "/images/braised-beef-tripe.jpg" }
+        { "name": "滷豆干", "price": 30, "description": "", "options": [], "image": "/images/dried-tofu.jpg" },
+        { "name": "滷百頁豆腐", "price": 30, "description": "", "options": [], "image": "/images/hyakuyo-tofu.jpg" },
+        { "name": "滷牛筋", "price": 55, "description": "", "options": [], "image": "/images/braised-beef-tendon.jpg" },
+        { "name": "滷牛肚", "price": 55, "description": "", "options": [], "image": "/images/braised-beef-tripe.jpg" }
       ]
     },
     {
-      "name": "精選小菜",
+      "name": "小菜",
       "items": [
-        { "name": "涼拌海帶芽", "price": 35 },
-        { "name": "涼拌干絲", "price": 35 },
-        { "name": "涼拌毛豆", "price": 35 },
-        { "name": "麻油豬肝", "price": 45 },
-        { "name": "涼拌雞胗", "price": 45 },
-        { "name": "煙燻豬耳朵", "price": 45 }
+        { "name": "涼拌海帶芽", "price": 30, "description": "", "options": [], "image": "" },
+        { "name": "涼拌干絲", "price": 30, "description": "", "options": [], "image": "" },
+        { "name": "涼拌毛豆", "price": 30, "description": "", "options": [], "image": "" },
+        { "name": "麻油豬肝", "price": 40, "description": "", "options": [], "image": "" },
+        { "name": "涼拌雞胗", "price": 40, "description": "", "options": [], "image": "" },
+        { "name": "煙燻豬耳", "price": 40, "description": "", "options": [], "image": "" }
       ]
     },
     {
-      "name": "飲品（內用自助）",
+      "name": "飲料（內用自助）",
       "items": [
-        { "name": "耶加紅茶", "price": 0, "description": "內用無限暢飲，請至飲料機自助取用" },
-        { "name": "輕乳奶茶", "price": 0, "description": "內用無限暢飲，可自行加珍珠變成珍珠奶茶" }
+        { "name": "古早味紅茶", "price": 0, "description": "內用免費，請至飲料機自助取用", "options": [], "image": "" },
+        { "name": "鮮奶茶", "price": 0, "description": "內用免費，請至飲料機自助取用", "options": [], "image": "" }
       ]
     }
   ]

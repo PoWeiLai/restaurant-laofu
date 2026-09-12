@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import StaffGate from '../components/StaffGate.vue'
+import TrialBanner from '../components/TrialBanner.vue'
 import { api, clockTime, subscribe, useShopTitle, type Order } from '../api'
 
 const shop = useShopTitle('廚房出單看板')
@@ -117,6 +118,7 @@ onUnmounted(() => {
         </div>
       </header>
 
+      <TrialBanner :shop="shop" class="trial-bar" />
       <p v-if="error" class="err">{{ error }}</p>
 
       <div class="cols">
@@ -236,6 +238,10 @@ onUnmounted(() => {
 .err {
   margin: 12px 20px;
   color: #b3261e;
+}
+/* 抬頭下方的試用期提醒，跟兩欄看板對齊 */
+.trial-bar {
+  margin: 16px 20px 0;
 }
 .cols {
   display: grid;

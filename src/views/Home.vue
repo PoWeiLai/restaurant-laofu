@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api, useShopTitle, type Table } from '../api'
+import TrialBanner from '../components/TrialBanner.vue'
 
 // 店名等資料都在後台「店家設定」裡，這裡不寫死
 const shop = useShopTitle('線上點餐')
@@ -17,13 +18,7 @@ onMounted(async () => {
       <p>{{ shop?.phone }}　{{ shop?.address }}</p>
     </div>
 
-    <p v-if="shop?.trial" class="trial" :class="{ over: shop.trial.expired }">
-      {{
-        shop.trial.expired
-          ? `試用期已於 ${shop.trial.until} 結束，客人端已停止接單`
-          : `試用期至 ${shop.trial.until}，還剩 ${shop.trial.daysLeft} 天`
-      }}
-    </p>
+    <TrialBanner :shop="shop" />
 
     <p class="muted">客人掃桌上的 QRcode 即可點餐，訂單直接進廚房看板。</p>
 
@@ -76,19 +71,6 @@ onMounted(async () => {
   margin: 6px 0 0;
   color: rgba(255, 255, 255, 0.82);
   font-size: 14px;
-}
-.trial {
-  margin: 0 0 12px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: var(--gold-soft);
-  color: var(--brand-dark);
-  text-align: center;
-  font-weight: 600;
-}
-.trial.over {
-  background: var(--warn-soft);
-  color: var(--warn);
 }
 .cards {
   display: grid;

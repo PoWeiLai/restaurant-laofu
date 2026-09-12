@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue'
 import StaffGate from '../components/StaffGate.vue'
+import TrialBanner from '../components/TrialBanner.vue'
 import {
   api,
   clearPin,
@@ -369,6 +370,10 @@ onUnmounted(unsubscribe)
         </nav>
         <button @click="logout">登出</button>
       </header>
+
+      <div v-if="shop?.trial" class="wrap trial-bar no-print">
+        <TrialBanner :shop="shop" />
+      </div>
 
       <!-- 菜單管理 -->
       <main v-show="tab === 'menu'" class="wrap no-print">
@@ -792,6 +797,13 @@ onUnmounted(unsubscribe)
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+/* 試用期提醒跟內容同寬；下面緊接著分頁自己的 padding，這裡不重複留白 */
+.trial-bar {
+  padding-bottom: 0;
+}
+.admin .trial-bar > * {
+  margin: 0;
 }
 .pad {
   padding: 18px;
